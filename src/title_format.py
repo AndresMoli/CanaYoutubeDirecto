@@ -29,9 +29,8 @@ MONTHS_ES = [
 
 
 def format_spanish_date(target_date: date) -> str:
-    weekday_es = WEEKDAYS_ES[target_date.weekday()]
     month_es = MONTHS_ES[target_date.month - 1]
-    return f"{weekday_es} {target_date.day} de {month_es}"
+    return f"{target_date.day} de {month_es}"
 
 
 def build_title(prefix: str, target_date: date) -> str:

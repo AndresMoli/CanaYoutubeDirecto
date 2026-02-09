@@ -251,7 +251,8 @@ def run_scheduler(youtube, config: Config) -> int:
         )
     else:
         start_after = base_start
-    end_date = today + timedelta(days=config.max_days_ahead)
+    max_days_ahead = min(config.max_days_ahead, 7)
+    end_date = today + timedelta(days=max_days_ahead)
     if start_date > end_date:
         _log(
             "SKIP: no hay días pendientes (inicio "
