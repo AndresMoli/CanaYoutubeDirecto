@@ -33,6 +33,22 @@ class StopCreationLimit(Exception):
         self.details = details
 
 
+def _log(message: str) -> None:
+    print(message, flush=True)
+
+
+def _load_timezone(name: str) -> ZoneInfo:
+    tz_name = (name or "").strip()
+    if not tz_name:
+        _log("WARN: timezone vacío, usando UTC.")
+        return ZoneInfo("UTC")
+    try:
+        return ZoneInfo(tz_name)
+    except Exception as exc:
+        _log(f"WARN: timezone inválida '{tz_name}', usando UTC. ({exc})")
+        return ZoneInfo("UTC")
+
+
 def _rfc3339(dt: datetime) -> str:
     return dt.isoformat()
 
@@ -195,12 +211,8 @@ def _bind_stream(youtube, broadcast_id: str, stream_id: str) -> None:
     request.execute()
 
 
-def _log(message: str) -> None:
-    print(message, flush=True)
-
-
 def run_scheduler(youtube, config: Config) -> int:
-    tz = ZoneInfo(config.timezone)
+    tz = _load_timezone(config.timezone)
     today = datetime.now(tz).date()
     definitions = [
         BroadcastDefinition(config.keyword_misa_10, time(10, 0), config.keyword_misa_10),
