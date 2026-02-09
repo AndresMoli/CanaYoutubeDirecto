@@ -34,6 +34,16 @@ def _get_bool_env(name: str, default: bool) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "y"}
 
 
+def _get_int_env(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if not value:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
 def load_config() -> Config:
     return Config(
         client_id=_require_env("YT_CLIENT_ID"),
@@ -45,7 +55,7 @@ def load_config() -> Config:
         keyword_misa_12=os.getenv("YT_KEYWORD_MISA_12", "Misa 12h"),
         keyword_misa_20=os.getenv("YT_KEYWORD_MISA_20", "Misa 20h"),
         keyword_vela_21=os.getenv("YT_KEYWORD_VELA_21", "Vela 21h"),
-        start_offset_days=int(os.getenv("YT_START_OFFSET_DAYS", "1")),
-        max_days_ahead=int(os.getenv("YT_MAX_DAYS_AHEAD", "3650")),
+        start_offset_days=_get_int_env("YT_START_OFFSET_DAYS", 1),
+        max_days_ahead=_get_int_env("YT_MAX_DAYS_AHEAD", 3650),
         stop_on_create_limit=_get_bool_env("YT_STOP_ON_CREATE_LIMIT", True),
     )
