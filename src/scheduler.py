@@ -114,7 +114,6 @@ def find_template_by_keyword(youtube, keyword: str) -> Optional[BroadcastTemplat
         mine=True,
         maxResults=50,
         broadcastType="all",
-        order="date",
     )
     response = request.execute()
     for item in response.get("items", []):
@@ -211,6 +210,24 @@ def _bind_stream(youtube, broadcast_id: str, stream_id: str) -> None:
     request.execute()
 
 
+def _log_status_list(title: str, items: list[str]) -> None:
+    _log(f"STATUS: {title} ({len(items)})")
+    for item in items:
+        _log(f"  - {item}")
+
+
+def _log_summary(
+    planned: list[str],
+    created: list[str],
+    existing: list[str],
+    failed: list[str],
+) -> None:
+    _log_status_list("planificadas para crear", planned)
+    _log_status_list("creadas", created)
+    _log_status_list("ya existían", existing)
+    _log_status_list("fallidas", failed)
+
+
 def run_scheduler(youtube, config: Config) -> int:
     tz = _load_timezone(config.timezone)
     today = datetime.now(tz).date()
@@ -253,6 +270,11 @@ def run_scheduler(youtube, config: Config) -> int:
             else:
                 _log(f"TEMPLATE: '{definition.keyword}' no encontrada, usando defaults.")
 
+    planned: list[str] = []
+    created_titles: list[str] = []
+    existing_titles: list[str] = []
+    failed: list[str] = []
+
     for offset in range(total_days):
         target_date = start_date + timedelta(days=offset)
         _log(f"DAY: procesando {target_date.isoformat()}")
@@ -269,7 +291,9 @@ def run_scheduler(youtube, config: Config) -> int:
             existing = find_broadcast_by_title(youtube, title)
             if existing:
                 _log(f"SKIP: ya existe '{title}' (id={existing.get('id')})")
+                existing_titles.append(title)
                 continue
+            planned.append(title)
             template = templates.get(definition.keyword)
             try:
                 created = _create_broadcast(
@@ -280,6 +304,7 @@ def run_scheduler(youtube, config: Config) -> int:
                     default_privacy_status=config.default_privacy_status,
                 )
                 _log(f"CREATED: '{title}' (id={created.get('id')})")
+                created_titles.append(title)
                 stream_id = template.bound_stream_id if template else None
                 if stream_id:
                     _bind_stream(youtube, created.get("id"), stream_id)
@@ -289,10 +314,18 @@ def run_scheduler(youtube, config: Config) -> int:
                 if is_limit and config.stop_on_create_limit:
                     detail_text = detail or "API limit"
                     _log(f"STOP: límite alcanzado ({detail_text})")
+                    _log_summary(planned, created_titles, existing_titles, failed)
                     return 0
                 _log(f"ERROR: fallo creando '{title}'")
+                reason, message = _parse_error_reason(error)
+                if reason or message:
+                    failed.append(f"{title} ({reason or 'error'}: {message or 'sin detalle'})")
+                else:
+                    failed.append(title)
+                _log_summary(planned, created_titles, existing_titles, failed)
                 raise
     _log("DONE: reached max days ahead without limit.")
+    _log_summary(planned, created_titles, existing_titles, failed)
     return 0
 
 
