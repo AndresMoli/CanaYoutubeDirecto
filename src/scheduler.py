@@ -61,7 +61,7 @@ def _iter_broadcasts(youtube, page_size: int = 50) -> Iterable[dict[str, Any]]:
             mine=True,
             maxResults=page_size,
             pageToken=page_token,
-            broadcastStatus="all",
+            broadcastType="all",
         )
         response = request.execute()
         for item in response.get("items", []):
@@ -113,7 +113,7 @@ def find_template_by_keyword(youtube, keyword: str) -> Optional[BroadcastTemplat
         part="id,snippet,contentDetails,status",
         mine=True,
         maxResults=50,
-        broadcastStatus="all",
+        broadcastType="all",
         order="date",
     )
     response = request.execute()
