@@ -2,6 +2,9 @@ name: Schedule YouTube Live broadcasts
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - "ejecución_ahora.txt"
   schedule:
     - cron: "0 7 * * 1,3,5"
 

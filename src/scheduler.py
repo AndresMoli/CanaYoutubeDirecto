@@ -62,6 +62,36 @@ def find_broadcast_by_title(youtube, title: str) -> Optional[dict[str, Any]]:
     return None
 
 
+def _parse_scheduled_start(item: dict[str, Any], tz: ZoneInfo) -> Optional[datetime]:
+    scheduled_start = item.get("snippet", {}).get("scheduledStartTime")
+    if not scheduled_start:
+        return None
+    try:
+        parsed = datetime.fromisoformat(scheduled_start.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=ZoneInfo("UTC"))
+    return parsed.astimezone(tz)
+
+
+def find_latest_scheduled_broadcast(
+    youtube, keywords: Iterable[str], tz: ZoneInfo
+) -> Optional[datetime]:
+    latest: Optional[datetime] = None
+    keyword_list = tuple(keywords)
+    for item in _iter_broadcasts(youtube):
+        title = item.get("snippet", {}).get("title", "")
+        if not any(keyword in title for keyword in keyword_list):
+            continue
+        scheduled_start = _parse_scheduled_start(item, tz)
+        if not scheduled_start:
+            continue
+        if latest is None or scheduled_start > latest:
+            latest = scheduled_start
+    return latest
+
+
 def find_template_by_keyword(youtube, keyword: str) -> Optional[BroadcastTemplate]:
     request = youtube.liveBroadcasts().list(
         part="id,snippet,contentDetails,status",
@@ -172,13 +202,34 @@ def _log(message: str) -> None:
 def run_scheduler(youtube, config: Config) -> int:
     tz = ZoneInfo(config.timezone)
     today = datetime.now(tz).date()
-    start_date = today + timedelta(days=config.start_offset_days)
     definitions = [
         BroadcastDefinition(config.keyword_misa_10, time(10, 0), config.keyword_misa_10),
         BroadcastDefinition(config.keyword_misa_12, time(12, 0), config.keyword_misa_12),
         BroadcastDefinition(config.keyword_misa_20, time(20, 0), config.keyword_misa_20),
         BroadcastDefinition(config.keyword_vela_21, time(21, 0), config.keyword_vela_21),
     ]
+    start_date = today + timedelta(days=config.start_offset_days)
+    base_start = datetime.combine(start_date, time.min, tz)
+    latest_scheduled = find_latest_scheduled_broadcast(
+        youtube, (definition.keyword for definition in definitions), tz
+    )
+    if latest_scheduled and latest_scheduled > base_start:
+        start_date = latest_scheduled.date()
+        start_after = latest_scheduled
+        _log(
+            "START: ajustando inicio al siguiente hueco tras "
+            f"{latest_scheduled.isoformat()}"
+        )
+    else:
+        start_after = base_start
+    end_date = today + timedelta(days=config.max_days_ahead)
+    if start_date > end_date:
+        _log(
+            "SKIP: no hay días pendientes (inicio "
+            f"{start_date.isoformat()} > fin {end_date.isoformat()})."
+        )
+        return 0
+    total_days = (end_date - start_date).days + 1
     templates: dict[str, Optional[BroadcastTemplate]] = {}
     for definition in definitions:
         if definition.keyword not in templates:
@@ -190,7 +241,7 @@ def run_scheduler(youtube, config: Config) -> int:
             else:
                 _log(f"TEMPLATE: '{definition.keyword}' no encontrada, usando defaults.")
 
-    for offset in range(config.max_days_ahead):
+    for offset in range(total_days):
         target_date = start_date + timedelta(days=offset)
         _log(f"DAY: procesando {target_date.isoformat()}")
         for definition in definitions:
@@ -199,12 +250,14 @@ def run_scheduler(youtube, config: Config) -> int:
                 and target_date.weekday() != 3
             ):
                 continue
+            scheduled_start = datetime.combine(target_date, definition.scheduled_time, tz)
+            if target_date == start_after.date() and scheduled_start <= start_after:
+                continue
             title = build_title(definition.prefix, target_date)
             existing = find_broadcast_by_title(youtube, title)
             if existing:
                 _log(f"SKIP: ya existe '{title}' (id={existing.get('id')})")
                 continue
-            scheduled_start = datetime.combine(target_date, definition.scheduled_time, tz)
             template = templates.get(definition.keyword)
             try:
                 created = _create_broadcast(
