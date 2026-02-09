@@ -1,0 +1,36 @@
+name: Schedule YouTube Live broadcasts
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 7 * * 1,3,5"
+
+jobs:
+  create-broadcasts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run scheduler
+        env:
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+          YT_TIMEZONE: ${{ vars.YT_TIMEZONE }}
+          YT_DEFAULT_PRIVACY_STATUS: ${{ vars.YT_DEFAULT_PRIVACY_STATUS }}
+          YT_KEYWORD_MISA_10: ${{ vars.YT_KEYWORD_MISA_10 }}
+          YT_KEYWORD_MISA_12: ${{ vars.YT_KEYWORD_MISA_12 }}
+          YT_KEYWORD_MISA_20: ${{ vars.YT_KEYWORD_MISA_20 }}
+          YT_KEYWORD_VELA_21: ${{ vars.YT_KEYWORD_VELA_21 }}
+          YT_START_OFFSET_DAYS: ${{ vars.YT_START_OFFSET_DAYS }}
+          YT_MAX_DAYS_AHEAD: ${{ vars.YT_MAX_DAYS_AHEAD }}
+          YT_STOP_ON_CREATE_LIMIT: ${{ vars.YT_STOP_ON_CREATE_LIMIT }}
+        run: python -m src.main
