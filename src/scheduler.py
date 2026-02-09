@@ -71,8 +71,10 @@ def _iter_broadcasts(youtube, page_size: int = 50) -> Iterable[dict[str, Any]]:
             break
 
 
-def find_broadcast_by_title(youtube, title: str) -> Optional[dict[str, Any]]:
-    for item in _iter_broadcasts(youtube):
+def find_broadcast_by_title_in_items(
+    items: Iterable[dict[str, Any]], title: str
+) -> Optional[dict[str, Any]]:
+    for item in items:
         if item.get("snippet", {}).get("title") == title:
             return item
     return None
@@ -91,12 +93,12 @@ def _parse_scheduled_start(item: dict[str, Any], tz: ZoneInfo) -> Optional[datet
     return parsed.astimezone(tz)
 
 
-def find_latest_scheduled_broadcast(
-    youtube, keywords: Iterable[str], tz: ZoneInfo
+def find_latest_scheduled_broadcast_in_items(
+    items: Iterable[dict[str, Any]], keywords: Iterable[str], tz: ZoneInfo
 ) -> Optional[datetime]:
     latest: Optional[datetime] = None
     keyword_list = tuple(keywords)
-    for item in _iter_broadcasts(youtube):
+    for item in items:
         title = item.get("snippet", {}).get("title", "")
         if not any(keyword in title for keyword in keyword_list):
             continue
@@ -108,15 +110,10 @@ def find_latest_scheduled_broadcast(
     return latest
 
 
-def find_template_by_keyword(youtube, keyword: str) -> Optional[BroadcastTemplate]:
-    request = youtube.liveBroadcasts().list(
-        part="id,snippet,contentDetails,status",
-        mine=True,
-        maxResults=50,
-        broadcastType="all",
-    )
-    response = request.execute()
-    for item in response.get("items", []):
+def find_template_by_keyword_in_items(
+    items: Iterable[dict[str, Any]], keyword: str
+) -> Optional[BroadcastTemplate]:
+    for item in items:
         title = item.get("snippet", {}).get("title", "")
         if keyword in title:
             content_details = item.get("contentDetails", {})
@@ -127,6 +124,22 @@ def find_template_by_keyword(youtube, keyword: str) -> Optional[BroadcastTemplat
                 bound_stream_id=content_details.get("boundStreamId"),
             )
     return None
+
+
+def find_broadcast_by_title(youtube, title: str) -> Optional[dict[str, Any]]:
+    return find_broadcast_by_title_in_items(_iter_broadcasts(youtube), title)
+
+
+def find_latest_scheduled_broadcast(
+    youtube, keywords: Iterable[str], tz: ZoneInfo
+) -> Optional[datetime]:
+    return find_latest_scheduled_broadcast_in_items(
+        _iter_broadcasts(youtube), keywords, tz
+    )
+
+
+def find_template_by_keyword(youtube, keyword: str) -> Optional[BroadcastTemplate]:
+    return find_template_by_keyword_in_items(_iter_broadcasts(youtube), keyword)
 
 
 def _build_content_details(template: Optional[BroadcastTemplate]) -> dict[str, Any]:
@@ -239,8 +252,9 @@ def run_scheduler(youtube, config: Config) -> int:
     ]
     start_date = today + timedelta(days=config.start_offset_days)
     base_start = datetime.combine(start_date, time.min, tz)
-    latest_scheduled = find_latest_scheduled_broadcast(
-        youtube, (definition.keyword for definition in definitions), tz
+    broadcasts = list(_iter_broadcasts(youtube))
+    latest_scheduled = find_latest_scheduled_broadcast_in_items(
+        broadcasts, (definition.keyword for definition in definitions), tz
     )
     if latest_scheduled and latest_scheduled > base_start:
         start_date = latest_scheduled.date()
@@ -263,8 +277,8 @@ def run_scheduler(youtube, config: Config) -> int:
     templates: dict[str, Optional[BroadcastTemplate]] = {}
     for definition in definitions:
         if definition.keyword not in templates:
-            templates[definition.keyword] = find_template_by_keyword(
-                youtube, definition.keyword
+            templates[definition.keyword] = find_template_by_keyword_in_items(
+                broadcasts, definition.keyword
             )
             if templates[definition.keyword]:
                 _log(f"TEMPLATE: '{definition.keyword}' encontrada.")
@@ -289,7 +303,7 @@ def run_scheduler(youtube, config: Config) -> int:
             if target_date == start_after.date() and scheduled_start <= start_after:
                 continue
             title = build_title(definition.prefix, target_date)
-            existing = find_broadcast_by_title(youtube, title)
+            existing = find_broadcast_by_title_in_items(broadcasts, title)
             if existing:
                 _log(f"SKIP: ya existe '{title}' (id={existing.get('id')})")
                 existing_titles.append(title)
