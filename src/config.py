@@ -18,6 +18,10 @@ class Config:
     start_offset_days: int
     max_days_ahead: int
     stop_on_create_limit: bool
+    rate_limit_retry_limit: int
+    rate_limit_retry_base_seconds: float
+    rate_limit_retry_max_seconds: float
+    create_pause_seconds: float
 
 
 def _require_env(name: str) -> str:
@@ -52,6 +56,16 @@ def _get_str_env(name: str, default: str) -> str:
     return normalized or default
 
 
+def _get_float_env(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if not value:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
+
+
 def load_config() -> Config:
     return Config(
         client_id=_require_env("YT_CLIENT_ID"),
@@ -66,4 +80,8 @@ def load_config() -> Config:
         start_offset_days=_get_int_env("YT_START_OFFSET_DAYS", 1),
         max_days_ahead=_get_int_env("YT_MAX_DAYS_AHEAD", 3650),
         stop_on_create_limit=_get_bool_env("YT_STOP_ON_CREATE_LIMIT", True),
+        rate_limit_retry_limit=_get_int_env("YT_RATE_LIMIT_RETRY_LIMIT", 3),
+        rate_limit_retry_base_seconds=_get_float_env("YT_RATE_LIMIT_RETRY_BASE_SECONDS", 1.0),
+        rate_limit_retry_max_seconds=_get_float_env("YT_RATE_LIMIT_RETRY_MAX_SECONDS", 30.0),
+        create_pause_seconds=_get_float_env("YT_CREATE_PAUSE_SECONDS", 0.2),
     )
