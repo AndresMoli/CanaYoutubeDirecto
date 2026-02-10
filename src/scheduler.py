@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 import json
+import random
 from time import sleep
 import sys
 from typing import Any, Iterable, Optional
@@ -192,6 +193,16 @@ def _is_quota_or_limit_error(error: HttpError) -> tuple[bool, str | None]:
     return False, message
 
 
+def _is_rate_limit_http_error(error: HttpError) -> tuple[bool, str | None]:
+    reason, message = _parse_error_reason(error)
+    if error.resp.status == 403 and reason in {
+        "userRequestsExceedRateLimit",
+        "rateLimitExceeded",
+    }:
+        return True, reason
+    return False, message
+
+
 def _create_broadcast(
     youtube,
     title: str,
@@ -216,35 +227,58 @@ def _create_broadcast(
     return request.execute()
 
 
+def _with_rate_limit_retry(
+    operation_name: str,
+    title: str,
+    retry_limit: int,
+    base_seconds: float,
+    max_seconds: float,
+    operation,
+):
+    for attempt in range(retry_limit + 1):
+        try:
+            return operation()
+        except HttpError as error:
+            is_rate_limit, detail = _is_rate_limit_http_error(error)
+            if not is_rate_limit:
+                raise
+            if attempt >= retry_limit:
+                raise StopCreationLimit(
+                    f"rate limit en {operation_name}",
+                    details=detail or "userRequestsExceedRateLimit",
+                )
+            wait_seconds = min(max_seconds, base_seconds * (2**attempt)) + random.uniform(0, 0.5)
+            _log(
+                f"WARN: rate limit en {operation_name} para '{title}' "
+                f"(intento {attempt + 1}/{retry_limit + 1}), reintentando en {wait_seconds:.2f}s."
+            )
+            sleep(wait_seconds)
+
+
 def _create_broadcast_with_retry(
     youtube,
     title: str,
     scheduled_start: datetime,
     template: Optional[BroadcastTemplate],
     default_privacy_status: str,
-    retry_limit: int = 3,
+    retry_limit: int,
+    base_seconds: float,
+    max_seconds: float,
 ) -> dict[str, Any]:
-    for attempt in range(retry_limit + 1):
-        try:
-            return _create_broadcast(
-                youtube,
-                title=title,
-                scheduled_start=scheduled_start,
-                template=template,
-                default_privacy_status=default_privacy_status,
-            )
-        except HttpError as error:
-            reason, _ = _parse_error_reason(error)
-            if reason not in {"rateLimitExceeded", "userRateLimitExceeded", "userRequestsExceedRateLimit"}:
-                raise
-            if attempt >= retry_limit:
-                raise
-            wait_seconds = 2 ** (attempt + 1)
-            _log(
-                f"WARN: límite temporal al crear '{title}' (intento {attempt + 1}/{retry_limit + 1}), "
-                f"reintentando en {wait_seconds}s."
-            )
-            sleep(wait_seconds)
+    return _with_rate_limit_retry(
+        operation_name="liveBroadcasts.insert",
+        title=title,
+        retry_limit=retry_limit,
+        base_seconds=base_seconds,
+        max_seconds=max_seconds,
+        operation=lambda: _create_broadcast(
+            youtube,
+            title=title,
+            scheduled_start=scheduled_start,
+            template=template,
+            default_privacy_status=default_privacy_status,
+        ),
+    )
 
 
 def _ensure_template_for_keyword(
@@ -253,6 +287,9 @@ def _ensure_template_for_keyword(
     keyword: str,
     tz: ZoneInfo,
     default_privacy_status: str,
+    retry_limit: int,
+    base_seconds: float,
+    max_seconds: float,
 ) -> Optional[BroadcastTemplate]:
     template = find_template_by_keyword_in_items(broadcasts, keyword)
     if template:
@@ -270,12 +307,15 @@ def _ensure_template_for_keyword(
             scheduled_start=datetime.now(tz) + timedelta(minutes=10),
             template=None,
             default_privacy_status=default_privacy_status,
+            retry_limit=retry_limit,
+            base_seconds=base_seconds,
+            max_seconds=max_seconds,
         )
-    except HttpError as error:
-        reason, _ = _parse_error_reason(error)
-        if reason == "userRequestsExceedRateLimit":
+    except (HttpError, StopCreationLimit) as error:
+        detail = error.details if isinstance(error, StopCreationLimit) else _parse_error_reason(error)[0]
+        if detail in {"userRequestsExceedRateLimit", "rateLimitExceeded"}:
             _log(
-                "WARN: no se pudo crear la emisión base por userRequestsExceedRateLimit; "
+                "WARN: no se pudo crear la emisión base por rate limit; "
                 "se continúa sin plantilla."
             )
             return None
@@ -295,6 +335,25 @@ def _bind_stream(youtube, broadcast_id: str, stream_id: str) -> None:
         streamId=stream_id,
     )
     request.execute()
+
+
+def _bind_stream_with_retry(
+    youtube,
+    broadcast_id: str,
+    stream_id: str,
+    title: str,
+    retry_limit: int,
+    base_seconds: float,
+    max_seconds: float,
+) -> None:
+    _with_rate_limit_retry(
+        operation_name="liveBroadcasts.bind",
+        title=title,
+        retry_limit=retry_limit,
+        base_seconds=base_seconds,
+        max_seconds=max_seconds,
+        operation=lambda: _bind_stream(youtube, broadcast_id, stream_id),
+    )
 
 
 def _log_status_list(title: str, items: list[str]) -> None:
@@ -345,6 +404,9 @@ def run_scheduler(youtube, config: Config) -> int:
                 definition.keyword,
                 tz,
                 config.default_privacy_status,
+                config.rate_limit_retry_limit,
+                config.rate_limit_retry_base_seconds,
+                config.rate_limit_retry_max_seconds,
             )
             if templates[definition.keyword]:
                 _log(f"TEMPLATE: '{definition.keyword}' encontrada.")
@@ -381,13 +443,33 @@ def run_scheduler(youtube, config: Config) -> int:
                     scheduled_start=scheduled_start,
                     template=template,
                     default_privacy_status=config.default_privacy_status,
+                    retry_limit=config.rate_limit_retry_limit,
+                    base_seconds=config.rate_limit_retry_base_seconds,
+                    max_seconds=config.rate_limit_retry_max_seconds,
                 )
                 _log(f"CREATED: '{title}' (id={created.get('id')})")
                 created_titles.append(title)
+                broadcasts.append(created)
                 stream_id = template.bound_stream_id if template else None
                 if stream_id:
-                    _bind_stream(youtube, created.get("id"), stream_id)
+                    _bind_stream_with_retry(
+                        youtube,
+                        created.get("id"),
+                        stream_id,
+                        title,
+                        config.rate_limit_retry_limit,
+                        config.rate_limit_retry_base_seconds,
+                        config.rate_limit_retry_max_seconds,
+                    )
                     _log(f"BIND: broadcast {created.get('id')} -> stream {stream_id}")
+                sleep(config.create_pause_seconds)
+            except StopCreationLimit as limit_error:
+                if config.stop_on_create_limit:
+                    detail_text = limit_error.details or "rateLimitExceeded"
+                    _log(f"STOP: límite alcanzado ({detail_text})")
+                    _log_summary(planned, created_titles, existing_titles, failed)
+                    return 0
+                failed.append(f"{title} (rate limit: {limit_error.details or 'sin detalle'})")
             except HttpError as error:
                 is_limit, detail = _is_quota_or_limit_error(error)
                 if is_limit and config.stop_on_create_limit:
