@@ -83,6 +83,10 @@ class SchedulerTests(unittest.TestCase):
         self.assertIn(build_title("Misa de 12h", tomorrow), created_titles)
         self.assertIn(build_title("Misa de 20h", tomorrow), created_titles)
 
+        self.assertIn("Misa de 12h", created_titles)
+        self.assertIn("Misa de 20h", created_titles)
+        self.assertIn("Vela 21h", created_titles)
+
 
 if __name__ == "__main__":
     unittest.main()

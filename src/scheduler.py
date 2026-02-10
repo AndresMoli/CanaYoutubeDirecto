@@ -247,6 +247,47 @@ def _create_broadcast_with_retry(
             sleep(wait_seconds)
 
 
+def _ensure_template_for_keyword(
+    youtube,
+    broadcasts: list[dict[str, Any]],
+    keyword: str,
+    tz: ZoneInfo,
+    default_privacy_status: str,
+) -> Optional[BroadcastTemplate]:
+    template = find_template_by_keyword_in_items(broadcasts, keyword)
+    if template:
+        return template
+
+    template_title = keyword
+    _log(
+        f"TEMPLATE: '{keyword}' no encontrada. Creando emisión base con mismo nombre '{template_title}'."
+    )
+
+    try:
+        created = _create_broadcast_with_retry(
+            youtube,
+            title=template_title,
+            scheduled_start=datetime.now(tz) + timedelta(minutes=10),
+            template=None,
+            default_privacy_status=default_privacy_status,
+        )
+    except HttpError as error:
+        reason, _ = _parse_error_reason(error)
+        if reason == "userRequestsExceedRateLimit":
+            _log(
+                "WARN: no se pudo crear la emisión base por userRequestsExceedRateLimit; "
+                "se continúa sin plantilla."
+            )
+            return None
+        raise
+
+    broadcasts.append(created)
+    template = find_template_by_keyword_in_items([created], keyword)
+    if template:
+        _log(f"TEMPLATE: '{template_title}' creada para reutilización.")
+    return template
+
+
 def _bind_stream(youtube, broadcast_id: str, stream_id: str) -> None:
     request = youtube.liveBroadcasts().bind(
         part="id,contentDetails",
@@ -298,8 +339,12 @@ def run_scheduler(youtube, config: Config) -> int:
     templates: dict[str, Optional[BroadcastTemplate]] = {}
     for definition in definitions:
         if definition.keyword not in templates:
-            templates[definition.keyword] = find_template_by_keyword_in_items(
-                broadcasts, definition.keyword
+            templates[definition.keyword] = _ensure_template_for_keyword(
+                youtube,
+                broadcasts,
+                definition.keyword,
+                tz,
+                config.default_privacy_status,
             )
             if templates[definition.keyword]:
                 _log(f"TEMPLATE: '{definition.keyword}' encontrada.")
