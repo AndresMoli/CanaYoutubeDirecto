@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 import json
+from time import sleep
 import sys
 from typing import Any, Iterable, Optional
 from zoneinfo import ZoneInfo
@@ -181,6 +182,7 @@ def _is_quota_or_limit_error(error: HttpError) -> tuple[bool, str | None]:
         "dailyLimitExceeded",
         "rateLimitExceeded",
         "userRateLimitExceeded",
+        "userRequestsExceedRateLimit",
         "liveStreamingNotEnabled",
     }:
         return True, message or reason
@@ -212,6 +214,37 @@ def _create_broadcast(
         body=body,
     )
     return request.execute()
+
+
+def _create_broadcast_with_retry(
+    youtube,
+    title: str,
+    scheduled_start: datetime,
+    template: Optional[BroadcastTemplate],
+    default_privacy_status: str,
+    retry_limit: int = 3,
+) -> dict[str, Any]:
+    for attempt in range(retry_limit + 1):
+        try:
+            return _create_broadcast(
+                youtube,
+                title=title,
+                scheduled_start=scheduled_start,
+                template=template,
+                default_privacy_status=default_privacy_status,
+            )
+        except HttpError as error:
+            reason, _ = _parse_error_reason(error)
+            if reason not in {"rateLimitExceeded", "userRateLimitExceeded", "userRequestsExceedRateLimit"}:
+                raise
+            if attempt >= retry_limit:
+                raise
+            wait_seconds = 2 ** (attempt + 1)
+            _log(
+                f"WARN: límite temporal al crear '{title}' (intento {attempt + 1}/{retry_limit + 1}), "
+                f"reintentando en {wait_seconds}s."
+            )
+            sleep(wait_seconds)
 
 
 def _bind_stream(youtube, broadcast_id: str, stream_id: str) -> None:
@@ -251,20 +284,8 @@ def run_scheduler(youtube, config: Config) -> int:
         BroadcastDefinition(config.keyword_vela_21, time(21, 0), config.keyword_vela_21),
     ]
     start_date = today + timedelta(days=config.start_offset_days)
-    base_start = datetime.combine(start_date, time.min, tz)
     broadcasts = list(_iter_broadcasts(youtube))
-    latest_scheduled = find_latest_scheduled_broadcast_in_items(
-        broadcasts, (definition.keyword for definition in definitions), tz
-    )
-    if latest_scheduled and latest_scheduled > base_start:
-        start_date = latest_scheduled.date()
-        start_after = latest_scheduled
-        _log(
-            "START: ajustando inicio al siguiente hueco tras "
-            f"{latest_scheduled.isoformat()}"
-        )
-    else:
-        start_after = base_start
+    _log(f"START: procesando desde {start_date.isoformat()} (sin saltar huecos).")
     max_days_ahead = min(config.max_days_ahead, 7)
     end_date = today + timedelta(days=max_days_ahead)
     if start_date > end_date:
@@ -300,8 +321,6 @@ def run_scheduler(youtube, config: Config) -> int:
             ):
                 continue
             scheduled_start = datetime.combine(target_date, definition.scheduled_time, tz)
-            if target_date == start_after.date() and scheduled_start <= start_after:
-                continue
             title = build_title(definition.prefix, target_date)
             existing = find_broadcast_by_title_in_items(broadcasts, title)
             if existing:
@@ -311,7 +330,7 @@ def run_scheduler(youtube, config: Config) -> int:
             planned.append(title)
             template = templates.get(definition.keyword)
             try:
-                created = _create_broadcast(
+                created = _create_broadcast_with_retry(
                     youtube,
                     title=title,
                     scheduled_start=scheduled_start,
