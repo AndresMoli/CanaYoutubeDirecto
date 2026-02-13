@@ -21,9 +21,9 @@ class ConfigTests(unittest.TestCase):
             config = load_config()
 
         self.assertEqual(config.timezone, "Europe/Madrid")
-        self.assertEqual(config.keyword_misa_10, "Misa de 10h")
-        self.assertEqual(config.keyword_misa_12, "Misa de 12h")
-        self.assertEqual(config.keyword_misa_20, "Misa de 20h")
+        self.assertEqual(config.keyword_misa_10, "Misa 10h")
+        self.assertEqual(config.keyword_misa_12, "Misa 12h")
+        self.assertEqual(config.keyword_misa_20, "Misa 20h")
         self.assertEqual(config.keyword_vela_21, "Vela 21h")
 
 
