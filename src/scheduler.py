@@ -2,14 +2,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
+from io import BytesIO
 import json
 import random
 from time import sleep
 import sys
 from typing import Any, Iterable, Optional
+from urllib.request import urlopen
 from zoneinfo import ZoneInfo
 
 from googleapiclient.errors import HttpError
+from googleapiclient.http import MediaIoBaseUpload
 
 from .config import Config
 from .title_format import build_title
@@ -20,6 +23,8 @@ class BroadcastTemplate:
     content_details: dict[str, Any]
     privacy_status: str
     bound_stream_id: Optional[str]
+    description: str
+    thumbnail_url: Optional[str]
 
 
 @dataclass(frozen=True)
@@ -27,6 +32,19 @@ class BroadcastDefinition:
     prefix: str
     scheduled_time: time
     keyword: str
+    default_description: str
+
+
+DEFAULT_MISA_DESCRIPTION = (
+    "Si quieres hacer un donativo a la Parroquia:\n"
+    "https://smcana.es/donativos/\n"
+    "Donativo Bizum ONG: 00104 o 38194 o 38341"
+)
+
+DEFAULT_VELA_DESCRIPTION = (
+    "También puedes oírlas después en Spotify:\n"
+    "https://open.spotify.com/show/1XitO8Ckw0kDvDTT9CuVp2"
+)
 
 
 class StopCreationLimit(Exception):
@@ -112,6 +130,15 @@ def find_latest_scheduled_broadcast_in_items(
     return latest
 
 
+def _pick_thumbnail_url(snippet: dict[str, Any]) -> Optional[str]:
+    thumbnails = snippet.get("thumbnails", {})
+    for key in ("maxres", "standard", "high", "medium", "default"):
+        url = thumbnails.get(key, {}).get("url")
+        if url:
+            return url
+    return None
+
+
 def find_template_by_keyword_in_items(
     items: Iterable[dict[str, Any]], keyword: str
 ) -> Optional[BroadcastTemplate]:
@@ -120,10 +147,13 @@ def find_template_by_keyword_in_items(
         if keyword in title:
             content_details = item.get("contentDetails", {})
             status = item.get("status", {})
+            snippet = item.get("snippet", {})
             return BroadcastTemplate(
                 content_details=content_details,
                 privacy_status=status.get("privacyStatus", "unlisted"),
                 bound_stream_id=content_details.get("boundStreamId"),
+                description=snippet.get("description", ""),
+                thumbnail_url=_pick_thumbnail_url(snippet),
             )
     return None
 
@@ -206,6 +236,7 @@ def _is_rate_limit_http_error(error: HttpError) -> tuple[bool, str | None]:
 def _create_broadcast(
     youtube,
     title: str,
+    description: str,
     scheduled_start: datetime,
     template: Optional[BroadcastTemplate],
     default_privacy_status: str,
@@ -213,6 +244,7 @@ def _create_broadcast(
     body = {
         "snippet": {
             "title": title,
+            "description": description,
             "scheduledStartTime": _rfc3339(scheduled_start),
         },
         "status": {
@@ -258,6 +290,7 @@ def _with_rate_limit_retry(
 def _create_broadcast_with_retry(
     youtube,
     title: str,
+    description: str,
     scheduled_start: datetime,
     template: Optional[BroadcastTemplate],
     default_privacy_status: str,
@@ -274,6 +307,7 @@ def _create_broadcast_with_retry(
         operation=lambda: _create_broadcast(
             youtube,
             title=title,
+            description=description,
             scheduled_start=scheduled_start,
             template=template,
             default_privacy_status=default_privacy_status,
@@ -304,6 +338,7 @@ def _ensure_template_for_keyword(
         created = _create_broadcast_with_retry(
             youtube,
             title=template_title,
+            description="",
             scheduled_start=datetime.now(tz) + timedelta(minutes=10),
             template=None,
             default_privacy_status=default_privacy_status,
@@ -356,6 +391,30 @@ def _bind_stream_with_retry(
     )
 
 
+def _set_thumbnail_from_url(youtube, video_id: str, thumbnail_url: str) -> None:
+    with urlopen(thumbnail_url) as response:
+        content_type = response.headers.get_content_type()
+        data = response.read()
+    media = MediaIoBaseUpload(
+        BytesIO(data),
+        mimetype=content_type or "image/jpeg",
+        resumable=False,
+    )
+    youtube.thumbnails().set(videoId=video_id, media_body=media).execute()
+
+
+def _copy_thumbnail_if_available(youtube, broadcast_id: str, template: Optional[BroadcastTemplate]) -> None:
+    if not template or not template.thumbnail_url:
+        return
+    if not hasattr(youtube, "thumbnails"):
+        return
+    try:
+        _set_thumbnail_from_url(youtube, broadcast_id, template.thumbnail_url)
+        _log(f"THUMBNAIL: broadcast {broadcast_id} <- {template.thumbnail_url}")
+    except Exception as error:
+        _log(f"WARN: no se pudo copiar portada en {broadcast_id}: {error}")
+
+
 def _log_status_list(title: str, items: list[str]) -> None:
     _log(f"STATUS: {title} ({len(items)})")
     for item in items:
@@ -378,10 +437,10 @@ def run_scheduler(youtube, config: Config) -> int:
     tz = _load_timezone(config.timezone)
     today = datetime.now(tz).date()
     definitions = [
-        BroadcastDefinition(config.keyword_misa_10, time(10, 0), config.keyword_misa_10),
-        BroadcastDefinition(config.keyword_misa_12, time(12, 0), config.keyword_misa_12),
-        BroadcastDefinition(config.keyword_misa_20, time(20, 0), config.keyword_misa_20),
-        BroadcastDefinition(config.keyword_vela_21, time(21, 0), config.keyword_vela_21),
+        BroadcastDefinition(config.keyword_misa_10, time(10, 0), config.keyword_misa_10, DEFAULT_MISA_DESCRIPTION),
+        BroadcastDefinition(config.keyword_misa_12, time(12, 0), config.keyword_misa_12, DEFAULT_MISA_DESCRIPTION),
+        BroadcastDefinition(config.keyword_misa_20, time(20, 0), config.keyword_misa_20, DEFAULT_MISA_DESCRIPTION),
+        BroadcastDefinition(config.keyword_vela_21, time(21, 0), config.keyword_vela_21, DEFAULT_VELA_DESCRIPTION),
     ]
     start_date = today + timedelta(days=config.start_offset_days)
     broadcasts = list(_iter_broadcasts(youtube))
@@ -413,6 +472,8 @@ def run_scheduler(youtube, config: Config) -> int:
             else:
                 _log(f"TEMPLATE: '{definition.keyword}' no encontrada, usando defaults.")
 
+    shared_stream_id = next((t.bound_stream_id for t in templates.values() if t and t.bound_stream_id), None)
+
     planned: list[str] = []
     created_titles: list[str] = []
     existing_titles: list[str] = []
@@ -436,10 +497,12 @@ def run_scheduler(youtube, config: Config) -> int:
                 continue
             planned.append(title)
             template = templates.get(definition.keyword)
+            description = template.description if template and template.description else definition.default_description
             try:
                 created = _create_broadcast_with_retry(
                     youtube,
                     title=title,
+                    description=description,
                     scheduled_start=scheduled_start,
                     template=template,
                     default_privacy_status=config.default_privacy_status,
@@ -450,7 +513,7 @@ def run_scheduler(youtube, config: Config) -> int:
                 _log(f"CREATED: '{title}' (id={created.get('id')})")
                 created_titles.append(title)
                 broadcasts.append(created)
-                stream_id = template.bound_stream_id if template else None
+                stream_id = shared_stream_id
                 if stream_id:
                     _bind_stream_with_retry(
                         youtube,
@@ -462,6 +525,7 @@ def run_scheduler(youtube, config: Config) -> int:
                         config.rate_limit_retry_max_seconds,
                     )
                     _log(f"BIND: broadcast {created.get('id')} -> stream {stream_id}")
+                _copy_thumbnail_if_available(youtube, created.get("id"), template)
                 sleep(config.create_pause_seconds)
             except StopCreationLimit as limit_error:
                 if config.stop_on_create_limit:

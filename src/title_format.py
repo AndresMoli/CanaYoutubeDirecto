@@ -34,4 +34,5 @@ def format_spanish_date(target_date: date) -> str:
 
 
 def build_title(prefix: str, target_date: date) -> str:
-    return f"{prefix} - {format_spanish_date(target_date)}"
+    weekday_es = WEEKDAYS_ES[target_date.weekday()]
+    return f"{prefix} - {weekday_es} {format_spanish_date(target_date)}"
