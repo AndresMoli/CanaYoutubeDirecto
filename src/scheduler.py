@@ -481,13 +481,22 @@ def _set_thumbnail_from_url(youtube, video_id: str, thumbnail_url: str) -> None:
     youtube.thumbnails().set(videoId=video_id, media_body=media).execute()
 
 
-def _copy_thumbnail_if_fallback(youtube, broadcast_id: str, template: Optional[BroadcastTemplate]) -> None:
+def _copy_thumbnail_if_fallback(
+    youtube,
+    broadcast_id: str,
+    template: Optional[BroadcastTemplate],
+    keyword: str,
+    copied_keywords: set[str],
+) -> None:
+    if keyword in copied_keywords:
+        return
     if not template or not template.thumbnail_url or template.from_emitted:
         return
     if not hasattr(youtube, "thumbnails"):
         return
     try:
         _set_thumbnail_from_url(youtube, broadcast_id, template.thumbnail_url)
+        copied_keywords.add(keyword)
         _log(f"THUMBNAIL: broadcast {broadcast_id} <- {template.thumbnail_url}")
     except Exception as error:
         _log(f"WARN: no se pudo copiar portada en {broadcast_id}: {error}")
@@ -558,6 +567,7 @@ def run_scheduler(youtube, config: Config) -> int:
     created_titles: list[str] = []
     existing_titles: list[str] = []
     failed: list[str] = []
+    copied_thumbnail_keywords: set[str] = set()
 
     for offset in range(total_days):
         target_date = start_date + timedelta(days=offset)
@@ -605,7 +615,13 @@ def run_scheduler(youtube, config: Config) -> int:
                         config.rate_limit_retry_max_seconds,
                     )
                     _log(f"BIND: broadcast {created.get('id')} -> stream {stream_id}")
-                _copy_thumbnail_if_fallback(youtube, created.get("id"), template)
+                _copy_thumbnail_if_fallback(
+                    youtube,
+                    created.get("id"),
+                    template,
+                    definition.keyword,
+                    copied_thumbnail_keywords,
+                )
                 sleep(config.create_pause_seconds)
             except StopCreationLimit as limit_error:
                 if config.stop_on_create_limit:
