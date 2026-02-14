@@ -55,6 +55,7 @@ Para soportar dos cuentas:
 - `YT_STOP_ON_CREATE_LIMIT` (default: `true`)
 - `YT_CREATION_MODE` (default: `studio_ui`; valores: `studio_ui` o `api`)
 - `YT_STUDIO_STORAGE_STATE_PATH` (default: vacío; obligatorio si `YT_CREATION_MODE=studio_ui`)
+  - Debe apuntar a un archivo JSON de Playwright. Si se pasa un directorio, el sistema intentará usar `storage_state.json` o el único `*.json` disponible dentro.
 - `YT_STUDIO_HEADLESS` (default: `true`)
 - `YT_STUDIO_TIMEOUT_MS` (default: `30000`)
 - `YT_STUDIO_SLOW_MO_MS` (default: `0`)
