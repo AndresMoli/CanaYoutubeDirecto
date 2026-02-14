@@ -546,7 +546,7 @@ def run_scheduler(youtube, config: Config) -> int:
     start_date = today + timedelta(days=config.start_offset_days)
     broadcasts = list(_iter_broadcasts(youtube))
     _log(f"START: procesando desde {start_date.isoformat()} (sin saltar huecos).")
-    max_days_ahead = min(config.max_days_ahead, 15)
+    max_days_ahead = min(config.max_days_ahead, 11)
     end_date = today + timedelta(days=max_days_ahead)
     if start_date > end_date:
         _log(

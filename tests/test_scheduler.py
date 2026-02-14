@@ -138,8 +138,8 @@ class SchedulerTests(unittest.TestCase):
             for body in youtube._live.inserted_bodies
             if "scheduledStartTime" in body["snippet"]
         }
-        self.assertIn(today + timedelta(days=15), scheduled_dates)
-        self.assertNotIn(today + timedelta(days=16), scheduled_dates)
+        self.assertIn(today + timedelta(days=11), scheduled_dates)
+        self.assertNotIn(today + timedelta(days=12), scheduled_dates)
 
     def test_creates_without_template_and_without_skipping_start_day(self) -> None:
         tz = ZoneInfo("UTC")
