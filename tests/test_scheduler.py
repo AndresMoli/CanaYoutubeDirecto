@@ -111,7 +111,18 @@ class _ThumbnailUploadYoutube(_FakeYoutube):
 
 
 
+class _FakeStudioCreator:
+    def __init__(self, **_kwargs):
+        self.calls = []
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return None
+
+    def create_with_previous_settings(self, **kwargs):
+        self.calls.append(kwargs)
 
 
 class _NoThumbnailUploadYoutube(_FakeYoutube):
@@ -225,6 +236,48 @@ class SchedulerTests(unittest.TestCase):
         self.assertIn(build_title("Misa 10h", tomorrow), created_titles)
         self.assertIn(build_title("Misa 12h", tomorrow), created_titles)
         self.assertIn(build_title("Misa 20h", tomorrow), created_titles)
+
+    def test_studio_mode_skips_api_insert_and_uses_ui_creator(self) -> None:
+        tz = ZoneInfo("UTC")
+        today = datetime.now(tz).date()
+        template_item = {
+            "id": "template-10",
+            "snippet": {
+                "title": "Misa 10h histórica",
+                "description": "Descripción emitida",
+                "scheduledStartTime": datetime.combine(today, datetime.min.time(), tz).isoformat(),
+                "actualEndTime": datetime.combine(today, datetime.min.time(), tz).isoformat(),
+            },
+            "contentDetails": {"boundStreamId": "stream-shared"},
+            "status": {"privacyStatus": "unlisted"},
+        }
+
+        youtube = _FakeYoutube([template_item])
+        config = Config(
+            client_id="id",
+            client_secret="secret",
+            refresh_token="token",
+            timezone="UTC",
+            default_privacy_status="unlisted",
+            keyword_misa_10="Misa 10h",
+            keyword_misa_12="Misa 12h",
+            keyword_misa_20="Misa 20h",
+            keyword_vela_21="Vela 21h",
+            start_offset_days=1,
+            max_days_ahead=1,
+            stop_on_create_limit=True,
+            rate_limit_retry_limit=1,
+            rate_limit_retry_base_seconds=0.0,
+            rate_limit_retry_max_seconds=0.0,
+            create_pause_seconds=0.0,
+            creation_mode="studio_ui",
+            studio_storage_state_path="fake.json",
+        )
+
+        with patch("src.scheduler_studio.StudioBroadcastCreator", _FakeStudioCreator):
+            run_scheduler(youtube, config)
+
+        self.assertEqual(len(youtube._live.inserted_bodies), 0)
 
     def test_does_not_upload_thumbnail_when_reusing_metadata(self) -> None:
         tz = ZoneInfo("UTC")

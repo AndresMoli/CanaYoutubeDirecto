@@ -25,6 +25,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.keyword_misa_12, "Misa 12h")
         self.assertEqual(config.keyword_misa_20, "Misa 20h")
         self.assertEqual(config.keyword_vela_21, "Vela 21h")
+        self.assertEqual(config.creation_mode, "studio_ui")
 
 
 if __name__ == "__main__":

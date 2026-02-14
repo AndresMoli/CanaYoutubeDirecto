@@ -22,6 +22,11 @@ class Config:
     rate_limit_retry_base_seconds: float
     rate_limit_retry_max_seconds: float
     create_pause_seconds: float
+    creation_mode: str = "api"
+    studio_storage_state_path: str = ""
+    studio_headless: bool = True
+    studio_timeout_ms: int = 30000
+    studio_slow_mo_ms: int = 0
 
 
 def _require_env(name: str) -> str:
@@ -84,4 +89,9 @@ def load_config() -> Config:
         rate_limit_retry_base_seconds=_get_float_env("YT_RATE_LIMIT_RETRY_BASE_SECONDS", 1.0),
         rate_limit_retry_max_seconds=_get_float_env("YT_RATE_LIMIT_RETRY_MAX_SECONDS", 30.0),
         create_pause_seconds=_get_float_env("YT_CREATE_PAUSE_SECONDS", 0.2),
+        creation_mode=_get_str_env("YT_CREATION_MODE", "studio_ui"),
+        studio_storage_state_path=_get_str_env("YT_STUDIO_STORAGE_STATE_PATH", ""),
+        studio_headless=_get_bool_env("YT_STUDIO_HEADLESS", True),
+        studio_timeout_ms=_get_int_env("YT_STUDIO_TIMEOUT_MS", 30000),
+        studio_slow_mo_ms=_get_int_env("YT_STUDIO_SLOW_MO_MS", 0),
     )
