@@ -31,9 +31,16 @@ Copia el refresh token resultante.
 
 ### Obligatorios (Secrets)
 
-- `YT_CLIENT_ID`
-- `YT_CLIENT_SECRET`
-- `YT_REFRESH_TOKEN`
+Para soportar dos cuentas:
+
+- ANDRES (sin prefijo):
+  - `YT_CLIENT_ID`
+  - `YT_CLIENT_SECRET`
+  - `YT_REFRESH_TOKEN`
+- CANA (con prefijo):
+  - `CANA_YT_CLIENT_ID`
+  - `CANA_YT_CLIENT_SECRET`
+  - `CANA_YT_REFRESH_TOKEN`
 
 ### Configurables (con defaults)
 
@@ -51,9 +58,11 @@ Copia el refresh token resultante.
 
 El workflow está en `.github/workflows/schedule.yml` y se ejecuta:
 
-- Manualmente (`workflow_dispatch`)
+- Manualmente (`workflow_dispatch`) eligiendo `target_account` (`ANDRES` o `CANA`).
 - Automáticamente al modificar `ejecución_ahora.txt`
 - Cron: **Lunes, Miércoles y Viernes** (UTC).
+
+Para ejecuciones automáticas (`push` y `schedule`), puedes fijar la cuenta por defecto con la variable de repositorio `YT_TARGET_ACCOUNT` (valor `CANA` o `ANDRES`). Si no está definida, usa `CANA`.
 
 > Nota: el cron es UTC. La lógica del script usa `Europe/Madrid` para calcular "mañana" y las horas 10/12/20/21.
 
