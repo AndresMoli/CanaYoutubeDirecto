@@ -38,6 +38,7 @@ jobs:
       - name: Run scheduler
         env:
           YT_TARGET_ACCOUNT: ${{ github.event_name == 'workflow_dispatch' && inputs.target_account || vars.YT_TARGET_ACCOUNT || 'CANA' }}
+          YT_CREATION_MODE: ${{ vars.YT_CREATION_MODE || 'api' }}
           YT_CLIENT_ID: ${{ (github.event_name == 'workflow_dispatch' && inputs.target_account || vars.YT_TARGET_ACCOUNT || 'CANA') == 'CANA' && secrets.CANA_YT_CLIENT_ID || secrets.YT_CLIENT_ID }}
           YT_CLIENT_SECRET: ${{ (github.event_name == 'workflow_dispatch' && inputs.target_account || vars.YT_TARGET_ACCOUNT || 'CANA') == 'CANA' && secrets.CANA_YT_CLIENT_SECRET || secrets.YT_CLIENT_SECRET }}
           YT_REFRESH_TOKEN: ${{ (github.event_name == 'workflow_dispatch' && inputs.target_account || vars.YT_TARGET_ACCOUNT || 'CANA') == 'CANA' && secrets.CANA_YT_REFRESH_TOKEN || secrets.YT_REFRESH_TOKEN }}

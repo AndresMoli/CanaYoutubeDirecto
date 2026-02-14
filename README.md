@@ -68,6 +68,8 @@ El workflow está en `.github/workflows/schedule.yml` y se ejecuta:
 - Automáticamente al modificar `ejecución_ahora.txt`
 - Cron: **Lunes, Miércoles y Viernes** (UTC).
 
+En GitHub Actions el workflow fuerza `YT_CREATION_MODE=api` por defecto (o el valor de la variable de repositorio `YT_CREATION_MODE` si la defines). Así no depende de `storage_state.json`, que no persiste entre ejecuciones de runners efímeros.
+
 Para ejecuciones automáticas (`push` y `schedule`), puedes fijar la cuenta por defecto con la variable de repositorio `YT_TARGET_ACCOUNT` (valor `CANA` o `ANDRES`). Si no está definida, usa `CANA`.
 
 > Nota: el cron es UTC. La lógica del script usa `Europe/Madrid` para calcular "mañana" y las horas 10/12/20/21.
