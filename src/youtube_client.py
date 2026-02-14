@@ -7,7 +7,12 @@ from googleapiclient.discovery import build
 from .config import Config
 
 
+def _log(message: str) -> None:
+    print(message, flush=True)
+
+
 def build_youtube_client(config: Config):
+    _log("AUTH: preparando credenciales OAuth para YouTube Data API.")
     credentials = Credentials(
         token=None,
         refresh_token=config.refresh_token,
@@ -16,5 +21,8 @@ def build_youtube_client(config: Config):
         client_secret=config.client_secret,
         scopes=["https://www.googleapis.com/auth/youtube"],
     )
+    _log("AUTH: solicitando access token a Google OAuth...")
     credentials.refresh(Request())
+    _log("AUTH: token obtenido correctamente.")
+    _log("API: construyendo cliente youtube v3.")
     return build("youtube", "v3", credentials=credentials)

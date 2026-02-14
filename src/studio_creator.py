@@ -14,6 +14,10 @@ class StudioCreationError(RuntimeError):
     pass
 
 
+def _log(message: str) -> None:
+    print(message, flush=True)
+
+
 @dataclass(frozen=True)
 class StudioCreateResult:
     title: str
@@ -44,6 +48,7 @@ class StudioBroadcastCreator(AbstractContextManager["StudioBroadcastCreator"]):
             raise StudioCreationError(
                 f"No existe YT_STUDIO_STORAGE_STATE_PATH: {self._storage_state_path}"
             )
+        _log(f"STUDIO: usando storage state en {self._storage_state_path}.")
         try:
             from playwright.sync_api import Error as PlaywrightError
             from playwright.sync_api import sync_playwright
@@ -53,6 +58,7 @@ class StudioBroadcastCreator(AbstractContextManager["StudioBroadcastCreator"]):
             ) from exc
 
         self._playwright = sync_playwright().start()
+        _log("STUDIO: Playwright iniciado.")
         try:
             self._browser = self._playwright.chromium.launch(
                 headless=self._headless,
@@ -65,6 +71,7 @@ class StudioBroadcastCreator(AbstractContextManager["StudioBroadcastCreator"]):
                     "`python -m playwright install --with-deps chromium`."
                 ) from exc
             raise
+        _log(f"STUDIO: Chromium lanzado (headless={self._headless}, slow_mo_ms={self._slow_mo_ms}).")
         self._context = self._browser.new_context(
             storage_state=str(self._storage_state_path),
             locale="es-ES",
@@ -72,6 +79,7 @@ class StudioBroadcastCreator(AbstractContextManager["StudioBroadcastCreator"]):
         )
         self._page = self._context.new_page()
         self._page.set_default_timeout(self._timeout_ms)
+        _log(f"STUDIO: contexto y página listos (timeout_ms={self._timeout_ms}).")
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
@@ -96,15 +104,19 @@ class StudioBroadcastCreator(AbstractContextManager["StudioBroadcastCreator"]):
         template_keyword: str,
     ) -> StudioCreateResult:
         page = self.page
+        _log(f"STUDIO: abriendo YouTube Studio en {STUDIO_LIVESTREAM_URL}")
         page.goto(STUDIO_LIVESTREAM_URL, wait_until="domcontentloaded")
+        _log("STUDIO: YouTube Studio cargado (domcontentloaded).")
 
         # 1) Programar emisión.
+        _log("STUDIO STEP 1/8: click en 'Programar emisión'.")
         self._click_first([
             page.get_by_role("button", name="Programar emisión"),
             page.get_by_role("button", name="Schedule stream"),
         ])
 
         # 2) Popup: Configurar con ajustes anteriores.
+        _log("STUDIO STEP 2/8: abrir 'Configurar con ajustes anteriores'.")
         self._click_first([
             page.get_by_text("Configurar con ajustes anteriores", exact=False),
             page.get_by_text("Reuse settings", exact=False),
@@ -112,15 +124,18 @@ class StudioBroadcastCreator(AbstractContextManager["StudioBroadcastCreator"]):
         ])
 
         # 3) Seleccionar la plantilla más reciente que contenga la keyword.
+        _log(f"STUDIO STEP 3/8: seleccionar plantilla con keyword '{template_keyword}'.")
         self._pick_latest_matching_template(template_keyword)
 
         # 4) Reutilizar configuración.
+        _log("STUDIO STEP 4/8: click en 'Reutilizar configuración'.")
         self._click_first([
             page.get_by_role("button", name="Reutilizar configuración"),
             page.get_by_role("button", name="Reuse settings"),
         ])
 
         # 5) Detalles: actualizar título.
+        _log(f"STUDIO STEP 5/8: rellenar título '{title}'.")
         title_box = self._first_locator([
             page.locator('textarea[aria-label*="Título"]'),
             page.locator('input[aria-label*="Título"]'),
@@ -131,9 +146,14 @@ class StudioBroadcastCreator(AbstractContextManager["StudioBroadcastCreator"]):
         title_box.fill(title)
 
         # 6) Siguiente -> Visibilidad.
+        _log("STUDIO STEP 6/8: navegar a pestaña 'Visibilidad'.")
         self._go_to_visibility_tab()
 
         # 7) Programar fecha y hora en Visibilidad.
+        _log(
+            "STUDIO STEP 7/8: activar 'Programar' y establecer fecha/hora "
+            f"{scheduled_start.strftime('%Y-%m-%d %H:%M %Z')}"
+        )
         self._click_first([
             page.get_by_label("Programar", exact=False),
             page.get_by_text("Programar", exact=False),
@@ -143,10 +163,12 @@ class StudioBroadcastCreator(AbstractContextManager["StudioBroadcastCreator"]):
         self._set_visibility_datetime(scheduled_start)
 
         # 8) Hecho.
+        _log("STUDIO STEP 8/8: confirmar con 'Hecho'.")
         self._click_first([
             page.get_by_role("button", name="Hecho"),
             page.get_by_role("button", name="Done"),
         ])
+        _log("STUDIO: emisión programada correctamente desde Studio UI.")
 
         return StudioCreateResult(
             title=title,
