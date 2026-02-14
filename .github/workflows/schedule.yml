@@ -6,7 +6,7 @@ on:
       target_account:
         description: "Cuenta de YouTube a usar (CANA o ANDRES)"
         required: true
-        default: "ANDRES"
+        default: "CANA"
         type: choice
         options:
           - ANDRES
@@ -14,8 +14,8 @@ on:
   push:
     paths:
       - "ejecución_ahora.txt"
-  schedule:
-    - cron: "0 7 * * 1,3,5"
+  # schedule:
+  #   - cron: "0 7 * * 1,3,5"
 
 jobs:
   create-broadcasts:
