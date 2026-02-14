@@ -99,7 +99,10 @@ def _iter_broadcasts(youtube, page_size: int = 50) -> Iterable[dict[str, Any]]:
             pageToken=page_token,
             broadcastType="all",
         )
-        response = request.execute()
+        response = _execute_with_transient_retry(
+            operation_name="liveBroadcasts.list",
+            operation=request.execute,
+        )
         for item in response.get("items", []):
             yield item
         page_token = response.get("nextPageToken")
@@ -387,6 +390,38 @@ def _is_rate_limit_http_error(error: HttpError) -> tuple[bool, str | None]:
     }:
         return True, reason
     return False, message
+
+
+def _is_transient_http_error(error: HttpError) -> tuple[bool, str | None]:
+    reason, message = _parse_error_reason(error)
+    if error.resp.status in {500, 502, 503, 504}:
+        return True, reason or message
+    if reason in {"backendError", "internalError", "SERVICE_UNAVAILABLE"}:
+        return True, reason
+    return False, message
+
+
+def _execute_with_transient_retry(
+    operation_name: str,
+    operation,
+    retry_limit: int = 4,
+    base_seconds: float = 1.0,
+    max_seconds: float = 8.0,
+):
+    for attempt in range(retry_limit + 1):
+        try:
+            return operation()
+        except HttpError as error:
+            is_transient, detail = _is_transient_http_error(error)
+            if not is_transient or attempt >= retry_limit:
+                raise
+            wait_seconds = min(max_seconds, base_seconds * (2**attempt)) + random.uniform(0, 0.5)
+            _log(
+                f"WARN: error transitorio en {operation_name} "
+                f"({detail or 'sin detalle'}) intento {attempt + 1}/{retry_limit + 1}. "
+                f"Reintentando en {wait_seconds:.2f}s."
+            )
+            sleep(wait_seconds)
 
 
 def _create_broadcast(
