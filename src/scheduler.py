@@ -461,39 +461,14 @@ def _ensure_chat_disabled(youtube, created_broadcast: dict[str, Any]) -> dict[st
         },
     )
     updated = request.execute()
-    confirmation = youtube.liveBroadcasts().list(
-        part="id,contentDetails",
-        id=broadcast_id,
-        maxResults=1,
-    ).execute()
-    confirmed = next(iter(confirmation.get("items", [])), {})
     merged = dict(created_broadcast)
     merged["contentDetails"] = {
         **created_broadcast.get("contentDetails", {}),
         **current_content_details,
         **updated.get("contentDetails", {}),
-        **confirmed.get("contentDetails", {}),
     }
-    if merged.get("contentDetails", {}).get("enableLiveChat"):
-        _log(f"WARN: YouTube mantiene chat activo tras update en emisión {broadcast_id}.")
-    else:
-        _log(f"CHAT: desactivado por actualización en emisión {broadcast_id}.")
+    _log(f"CHAT: desactivado por actualización en emisión {broadcast_id}.")
     return merged
-
-
-def _fetch_broadcast_state(youtube, broadcast_id: str) -> dict[str, Any]:
-    response = youtube.liveBroadcasts().list(
-        part="id,snippet,contentDetails,status,monetizationDetails",
-        id=broadcast_id,
-        maxResults=1,
-    ).execute()
-    return next(iter(response.get("items", [])), {})
-
-
-def _log_broadcast_payload(created_broadcast: dict[str, Any]) -> None:
-    broadcast_id = created_broadcast.get("id", "(sin id)")
-    _log(f"PAYLOAD: emisión confirmada por API (id={broadcast_id})")
-    _log(json.dumps(created_broadcast, ensure_ascii=False, indent=2, sort_keys=True))
 
 
 def _with_rate_limit_retry(
@@ -778,12 +753,6 @@ def run_scheduler(youtube, config: Config) -> int:
                     max_seconds=config.rate_limit_retry_max_seconds,
                 )
                 created = _ensure_chat_disabled(youtube, created)
-                created_id = created.get("id")
-                if created_id:
-                    confirmed = _fetch_broadcast_state(youtube, created_id)
-                    if confirmed:
-                        created = confirmed
-                    _log_broadcast_payload(created)
                 created_settings = _format_creation_settings(
                     {
                         "contentDetails": created.get("contentDetails", _build_content_details(template)),
@@ -792,6 +761,7 @@ def run_scheduler(youtube, config: Config) -> int:
                 )
                 _log(f"CREATED: '{title}' (id={created.get('id')}) | {created_settings}")
                 created_titles.append(title)
+                created_id = created.get("id")
                 if created_id and not _ensure_thumbnail(youtube, created_id, template, title):
                     _delete_broadcast(youtube, created_id)
                     failed.append(f"{title} (miniatura no replicada)")
