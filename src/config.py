@@ -80,8 +80,8 @@ def load_config() -> Config:
         start_offset_days=_get_int_env("YT_START_OFFSET_DAYS", 1),
         max_days_ahead=_get_int_env("YT_MAX_DAYS_AHEAD", 3650),
         stop_on_create_limit=_get_bool_env("YT_STOP_ON_CREATE_LIMIT", True),
-        rate_limit_retry_limit=_get_int_env("YT_RATE_LIMIT_RETRY_LIMIT", 6),
-        rate_limit_retry_base_seconds=_get_float_env("YT_RATE_LIMIT_RETRY_BASE_SECONDS", 2.0),
-        rate_limit_retry_max_seconds=_get_float_env("YT_RATE_LIMIT_RETRY_MAX_SECONDS", 90.0),
-        create_pause_seconds=_get_float_env("YT_CREATE_PAUSE_SECONDS", 1.0),
+        rate_limit_retry_limit=_get_int_env("YT_RATE_LIMIT_RETRY_LIMIT", 3),
+        rate_limit_retry_base_seconds=_get_float_env("YT_RATE_LIMIT_RETRY_BASE_SECONDS", 1.0),
+        rate_limit_retry_max_seconds=_get_float_env("YT_RATE_LIMIT_RETRY_MAX_SECONDS", 30.0),
+        create_pause_seconds=_get_float_env("YT_CREATE_PAUSE_SECONDS", 0.2),
     )

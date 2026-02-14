@@ -53,10 +53,6 @@ Para soportar dos cuentas:
 - `YT_START_OFFSET_DAYS` (default: `1` → mañana)
 - `YT_MAX_DAYS_AHEAD` (default: `3650` → días hacia adelante desde hoy)
 - `YT_STOP_ON_CREATE_LIMIT` (default: `true`)
-- `YT_RATE_LIMIT_RETRY_LIMIT` (default: `6`)
-- `YT_RATE_LIMIT_RETRY_BASE_SECONDS` (default: `2.0`)
-- `YT_RATE_LIMIT_RETRY_MAX_SECONDS` (default: `90.0`)
-- `YT_CREATE_PAUSE_SECONDS` (default: `1.0`)
 
 ## GitHub Actions
 
