@@ -10,7 +10,12 @@ from zoneinfo import ZoneInfo
 from googleapiclient.errors import HttpError
 
 from src.config import Config
-from src.scheduler import DEFAULT_MISA_DESCRIPTION, DEFAULT_VELA_DESCRIPTION, run_scheduler
+from src.scheduler import (
+    DEFAULT_MISA_DESCRIPTION,
+    DEFAULT_VELA_DESCRIPTION,
+    _iter_broadcasts,
+    run_scheduler,
+)
 from src.title_format import build_title
 
 
@@ -146,7 +151,50 @@ class _AlwaysRateLimitYoutube(_FakeYoutube):
         self._live = _AlwaysRateLimitLiveBroadcasts(items)
 
 
+class _Retry503Request:
+    def __init__(self, payload):
+        self._payload = payload
+        self._attempts = 0
+
+    def execute(self):
+        self._attempts += 1
+        if self._attempts == 1:
+            payload = {
+                "error": {
+                    "errors": [{"reason": "SERVICE_UNAVAILABLE", "message": "The service is currently unavailable."}],
+                    "message": "The service is currently unavailable.",
+                }
+            }
+            raise HttpError(
+                SimpleNamespace(status=503, reason="Service Unavailable"),
+                json.dumps(payload).encode("utf-8"),
+            )
+        return self._payload
+
+
+class _Retry503LiveBroadcasts(_FakeLiveBroadcasts):
+    def list(self, **kwargs):
+        broadcast_id = kwargs.get("id")
+        if broadcast_id:
+            return super().list(**kwargs)
+        return _Retry503Request({"items": self._items})
+
+
+class _Retry503Youtube(_FakeYoutube):
+    def __init__(self, items):
+        self._live = _Retry503LiveBroadcasts(items)
+
+
 class SchedulerTests(unittest.TestCase):
+    @patch("src.scheduler.sleep", return_value=None)
+    def test_iter_broadcasts_retries_on_service_unavailable(self, _sleep_mock) -> None:
+        youtube = _Retry503Youtube([{"id": "ok", "snippet": {"title": "Misa 10h"}}])
+
+        broadcasts = list(_iter_broadcasts(youtube))
+
+        self.assertEqual(len(broadcasts), 1)
+        self.assertEqual(broadcasts[0]["id"], "ok")
+
     def test_caps_schedule_window_to_fifteen_days(self) -> None:
         tz = ZoneInfo("UTC")
         today = datetime.now(tz).date()
