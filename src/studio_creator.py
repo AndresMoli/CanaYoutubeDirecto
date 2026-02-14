@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -34,6 +35,7 @@ class StudioBroadcastCreator(AbstractContextManager["StudioBroadcastCreator"]):
         timeout_ms: int,
         slow_mo_ms: int,
     ) -> None:
+        self._storage_state_raw = storage_state_path
         self._storage_state_path = Path(storage_state_path)
         self._headless = headless
         self._timeout_ms = timeout_ms
@@ -44,6 +46,12 @@ class StudioBroadcastCreator(AbstractContextManager["StudioBroadcastCreator"]):
         self._page = None
 
     def __enter__(self) -> "StudioBroadcastCreator":
+        if not self._storage_state_raw.strip():
+            raise StudioCreationError(
+                "Falta YT_STUDIO_STORAGE_STATE_PATH. Debe apuntar a un archivo JSON "
+                "generado por scripts/save_studio_storage_state.py."
+            )
+
         if self._storage_state_path.is_dir():
             candidate = self._storage_state_path / "storage_state.json"
             if candidate.is_file():
@@ -53,10 +61,24 @@ class StudioBroadcastCreator(AbstractContextManager["StudioBroadcastCreator"]):
                     f"usando {self._storage_state_path}."
                 )
             else:
-                raise StudioCreationError(
-                    "YT_STUDIO_STORAGE_STATE_PATH apunta a un directorio. "
-                    "Debe apuntar a un archivo JSON (por ejemplo: storage_state.json)."
-                )
+                json_files = sorted(self._storage_state_path.glob("*.json"))
+                if len(json_files) == 1:
+                    self._storage_state_path = json_files[0]
+                    _log(
+                        "STUDIO: YT_STUDIO_STORAGE_STATE_PATH es un directorio; "
+                        f"usando el único JSON detectado: {self._storage_state_path}."
+                    )
+                elif len(json_files) > 1:
+                    files_list = ", ".join(str(path.name) for path in json_files)
+                    raise StudioCreationError(
+                        "YT_STUDIO_STORAGE_STATE_PATH apunta a un directorio con varios JSON "
+                        f"({files_list}). Debe apuntar explícitamente al archivo correcto."
+                    )
+                else:
+                    raise StudioCreationError(
+                        "YT_STUDIO_STORAGE_STATE_PATH apunta a un directorio. "
+                        "Debe apuntar a un archivo JSON (por ejemplo: storage_state.json)."
+                    )
 
         if not self._storage_state_path.exists():
             raise StudioCreationError(
@@ -66,6 +88,25 @@ class StudioBroadcastCreator(AbstractContextManager["StudioBroadcastCreator"]):
             raise StudioCreationError(
                 "YT_STUDIO_STORAGE_STATE_PATH debe ser un archivo JSON válido. "
                 f"Valor actual: {self._storage_state_path}"
+            )
+        try:
+            with self._storage_state_path.open("r", encoding="utf-8") as storage_file:
+                parsed_storage_state = json.load(storage_file)
+        except json.JSONDecodeError as exc:
+            raise StudioCreationError(
+                "YT_STUDIO_STORAGE_STATE_PATH no contiene JSON válido. "
+                f"Archivo: {self._storage_state_path}"
+            ) from exc
+        except OSError as exc:
+            raise StudioCreationError(
+                "No se pudo leer YT_STUDIO_STORAGE_STATE_PATH. "
+                f"Archivo: {self._storage_state_path}"
+            ) from exc
+
+        if not isinstance(parsed_storage_state, dict):
+            raise StudioCreationError(
+                "YT_STUDIO_STORAGE_STATE_PATH debe contener un objeto JSON con el estado "
+                f"de Playwright. Archivo: {self._storage_state_path}"
             )
         _log(f"STUDIO: usando storage state en {self._storage_state_path}.")
         try:
