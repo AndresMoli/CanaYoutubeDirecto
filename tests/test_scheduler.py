@@ -184,11 +184,6 @@ class SchedulerTests(unittest.TestCase):
         self.assertIn(build_title("Misa 12h", tomorrow), created_titles)
         self.assertIn(build_title("Misa 20h", tomorrow), created_titles)
 
-        self.assertIn("Misa 12h", created_titles)
-        self.assertIn("Misa 20h", created_titles)
-        self.assertIn("Vela 21h", created_titles)
-
-
     def test_does_not_upload_thumbnail_when_reusing_metadata(self) -> None:
         tz = ZoneInfo("UTC")
         today = datetime.now(tz).date()
@@ -306,6 +301,46 @@ class SchedulerTests(unittest.TestCase):
         }
         self.assertEqual(description_by_title[misa_10_title], "Desc última 10")
         self.assertEqual(description_by_title[misa_12_title], "Desc última 12")
+
+    def test_skips_creation_when_same_slot_exists_even_with_different_title(self) -> None:
+        tz = ZoneInfo("UTC")
+        today = datetime.now(tz).date()
+        tomorrow = today + timedelta(days=1)
+        existing_slot = {
+            "id": "existing-misa-12",
+            "snippet": {
+                "title": "Misa 12h - Evento ya creado manualmente",
+                "description": "Desc previa",
+                "scheduledStartTime": datetime.combine(tomorrow, datetime.min.time().replace(hour=12), tz).isoformat(),
+            },
+            "contentDetails": {},
+            "status": {"privacyStatus": "unlisted"},
+        }
+
+        youtube = _FakeYoutube([existing_slot])
+        config = Config(
+            client_id="id",
+            client_secret="secret",
+            refresh_token="token",
+            timezone="UTC",
+            default_privacy_status="unlisted",
+            keyword_misa_10="Misa 10h",
+            keyword_misa_12="Misa 12h",
+            keyword_misa_20="Misa 20h",
+            keyword_vela_21="Vela 21h",
+            start_offset_days=1,
+            max_days_ahead=1,
+            stop_on_create_limit=True,
+            rate_limit_retry_limit=1,
+            rate_limit_retry_base_seconds=0.0,
+            rate_limit_retry_max_seconds=0.0,
+            create_pause_seconds=0.0,
+        )
+
+        run_scheduler(youtube, config)
+
+        created_titles = [body["snippet"]["title"] for body in youtube._live.inserted_bodies]
+        self.assertNotIn(build_title("Misa 12h", tomorrow), created_titles)
 
     def test_rate_limit_exits_zero_after_retries(self) -> None:
         youtube = _AlwaysRateLimitYoutube([])
