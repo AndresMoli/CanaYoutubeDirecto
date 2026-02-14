@@ -45,6 +45,7 @@ class StudioBroadcastCreator(AbstractContextManager["StudioBroadcastCreator"]):
                 f"No existe YT_STUDIO_STORAGE_STATE_PATH: {self._storage_state_path}"
             )
         try:
+            from playwright.sync_api import Error as PlaywrightError
             from playwright.sync_api import sync_playwright
         except ModuleNotFoundError as exc:
             raise StudioCreationError(
@@ -52,10 +53,18 @@ class StudioBroadcastCreator(AbstractContextManager["StudioBroadcastCreator"]):
             ) from exc
 
         self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(
-            headless=self._headless,
-            slow_mo=self._slow_mo_ms,
-        )
+        try:
+            self._browser = self._playwright.chromium.launch(
+                headless=self._headless,
+                slow_mo=self._slow_mo_ms,
+            )
+        except PlaywrightError as exc:
+            if "Executable doesn't exist" in str(exc):
+                raise StudioCreationError(
+                    "Faltan los navegadores de Playwright. Ejecuta "
+                    "`python -m playwright install --with-deps chromium`."
+                ) from exc
+            raise
         self._context = self._browser.new_context(
             storage_state=str(self._storage_state_path),
             locale="es-ES",

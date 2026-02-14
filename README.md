@@ -74,6 +74,8 @@ Para ejecuciones automáticas (`push` y `schedule`), puedes fijar la cuenta por 
 ## Ejecución local
 
 ```bash
+pip install -r requirements.txt
+python -m playwright install --with-deps chromium
 python -m src.main
 ```
 
@@ -103,6 +105,7 @@ python -m src.main
 Para generar el `storage_state.json` una vez (iniciando sesión manual):
 
 ```bash
+python -m playwright install --with-deps chromium
 python scripts/save_studio_storage_state.py storage_state.json
 ```
 
