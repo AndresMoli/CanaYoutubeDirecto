@@ -12,9 +12,10 @@ on:
           - ANDRES
           - CANA
   push:
+    branches:
+      - main
     paths:
       - "src/**"
-      - "ejecución_ahora.txt"
   # schedule:
   #   - cron: "0 7 * * 1,3,5"
 
