@@ -428,13 +428,28 @@ def _create_broadcast(
 
 
 def _ensure_chat_disabled(youtube, created_broadcast: dict[str, Any]) -> dict[str, Any]:
-    content_details = created_broadcast.get("contentDetails", {})
-    if not content_details.get("enableLiveChat", False):
-        return created_broadcast
-
     broadcast_id = created_broadcast.get("id")
     if not broadcast_id:
         return created_broadcast
+
+    verification = youtube.liveBroadcasts().list(
+        part="id,contentDetails",
+        id=broadcast_id,
+        maxResults=1,
+    ).execute()
+    current = next(iter(verification.get("items", [])), {})
+    current_content_details = current.get("contentDetails", {})
+    current_enable_live_chat = current_content_details.get(
+        "enableLiveChat",
+        created_broadcast.get("contentDetails", {}).get("enableLiveChat", False),
+    )
+    if not current_enable_live_chat:
+        merged = dict(created_broadcast)
+        merged["contentDetails"] = {
+            **created_broadcast.get("contentDetails", {}),
+            **current_content_details,
+        }
+        return merged
 
     request = youtube.liveBroadcasts().update(
         part="id,contentDetails",
@@ -448,7 +463,8 @@ def _ensure_chat_disabled(youtube, created_broadcast: dict[str, Any]) -> dict[st
     updated = request.execute()
     merged = dict(created_broadcast)
     merged["contentDetails"] = {
-        **content_details,
+        **created_broadcast.get("contentDetails", {}),
+        **current_content_details,
         **updated.get("contentDetails", {}),
     }
     _log(f"CHAT: desactivado por actualización en emisión {broadcast_id}.")
