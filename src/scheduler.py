@@ -675,6 +675,11 @@ def _log_summary(
 
 
 def run_scheduler(youtube, config: Config) -> int:
+    if config.creation_mode.strip().lower() == "studio_ui":
+        from .scheduler_studio import run_scheduler_studio
+
+        return run_scheduler_studio(youtube, config)
+
     tz = _load_timezone(config.timezone)
     today = datetime.now(tz).date()
     definitions = [
@@ -715,6 +720,7 @@ def run_scheduler(youtube, config: Config) -> int:
     created_titles: list[str] = []
     existing_titles: list[str] = []
     failed: list[str] = []
+
     for offset in range(total_days):
         target_date = start_date + timedelta(days=offset)
         _log(f"DAY: procesando {target_date.isoformat()}")

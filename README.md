@@ -1,6 +1,6 @@
 # CanaYoutubeDirecto
 
-Automatiza la creación masiva de emisiones programadas en YouTube Live usando la API de YouTube Data v3 y plantillas basadas en emisiones anteriores.
+Automatiza la creación masiva de emisiones programadas en YouTube Live. Puede crear por API de YouTube Data v3 o por interfaz de YouTube Studio (Playwright) reutilizando ajustes anteriores.
 
 ## Requisitos
 
@@ -53,6 +53,11 @@ Para soportar dos cuentas:
 - `YT_START_OFFSET_DAYS` (default: `1` → mañana)
 - `YT_MAX_DAYS_AHEAD` (default: `3650` → días hacia adelante desde hoy)
 - `YT_STOP_ON_CREATE_LIMIT` (default: `true`)
+- `YT_CREATION_MODE` (default: `studio_ui`; valores: `studio_ui` o `api`)
+- `YT_STUDIO_STORAGE_STATE_PATH` (default: vacío; obligatorio si `YT_CREATION_MODE=studio_ui`)
+- `YT_STUDIO_HEADLESS` (default: `true`)
+- `YT_STUDIO_TIMEOUT_MS` (default: `30000`)
+- `YT_STUDIO_SLOW_MO_MS` (default: `0`)
 
 ## GitHub Actions
 
@@ -83,3 +88,30 @@ python -m src.main
 - Si ya hay emisiones futuras, el proceso empieza después de la última existente.
 - Plantillas: usa la última emisión cuyo título contenga la keyword para copiar ajustes y stream asociado.
 - Cuando la API indique límite/cuota, el script termina con éxito y log: `STOP: límite alcanzado`.
+
+
+## Modo YouTube Studio (Playwright)
+
+La creación por defecto ahora es desde la interfaz de YouTube Studio (Playwright). Si quieres forzarlo explícitamente, usa:
+
+```bash
+export YT_CREATION_MODE="studio_ui"
+export YT_STUDIO_STORAGE_STATE_PATH="storage_state.json"
+python -m src.main
+```
+
+Para generar el `storage_state.json` una vez (iniciando sesión manual):
+
+```bash
+python scripts/save_studio_storage_state.py storage_state.json
+```
+
+En este modo, la creación entra exactamente en `https://studio.youtube.com/channel/UCZU9G9HPOLYK-QeaCJo6Fhg/livestreaming`, pulsa **Programar emisión**, luego **Configurar con ajustes anteriores**, selecciona la plantilla más reciente por keyword (`Misa 10h`, `Misa 12h`, `Misa 20h`, `Vela 21h`), pulsa **Reutilizar configuración**, cambia el título, avanza con **Siguiente** hasta **Visibilidad**, programa fecha/hora y finaliza con **Hecho**.
+
+
+Para volver al modo API clásico:
+
+```bash
+export YT_CREATION_MODE="api"
+python -m src.main
+```
