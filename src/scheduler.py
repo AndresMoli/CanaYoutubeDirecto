@@ -96,8 +96,37 @@ def _iter_broadcasts(youtube, page_size: int = 50) -> Iterable[dict[str, Any]]:
 def find_broadcast_by_title_in_items(
     items: Iterable[dict[str, Any]], title: str
 ) -> Optional[dict[str, Any]]:
+    normalized_title = " ".join(title.split()).casefold()
     for item in items:
-        if item.get("snippet", {}).get("title") == title:
+        candidate = item.get("snippet", {}).get("title", "")
+        if " ".join(candidate.split()).casefold() == normalized_title:
+            return item
+    return None
+
+
+def find_scheduled_broadcast_for_slot_in_items(
+    items: Iterable[dict[str, Any]],
+    *,
+    title: str,
+    keyword: str,
+    scheduled_start: datetime,
+    tz: ZoneInfo,
+) -> Optional[dict[str, Any]]:
+    by_title = find_broadcast_by_title_in_items(items, title)
+    if by_title:
+        return by_title
+
+    for item in items:
+        snippet = item.get("snippet", {})
+        candidate_title = snippet.get("title", "")
+        if keyword not in candidate_title:
+            continue
+        if snippet.get("actualEndTime"):
+            continue
+        candidate_start = _parse_scheduled_start(item, tz)
+        if not candidate_start:
+            continue
+        if candidate_start == scheduled_start:
             return item
     return None
 
@@ -377,51 +406,36 @@ def _create_broadcast_with_retry(
 
 
 def _ensure_template_for_keyword(
-    youtube,
     broadcasts: list[dict[str, Any]],
     keyword: str,
-    tz: ZoneInfo,
-    default_privacy_status: str,
-    retry_limit: int,
-    base_seconds: float,
-    max_seconds: float,
 ) -> Optional[BroadcastTemplate]:
     template = find_template_by_keyword_in_items(broadcasts, keyword)
     if template:
         return template
-
-    template_title = keyword
     _log(
-        f"TEMPLATE: '{keyword}' no encontrada. Creando emisión base con mismo nombre '{template_title}'."
+        f"TEMPLATE: '{keyword}' no encontrada en emisiones anteriores; se usan valores por defecto."
     )
+    return None
 
-    try:
-        created = _create_broadcast_with_retry(
-            youtube,
-            title=template_title,
-            description="",
-            scheduled_start=datetime.now(tz) + timedelta(minutes=10),
-            template=None,
-            default_privacy_status=default_privacy_status,
-            retry_limit=retry_limit,
-            base_seconds=base_seconds,
-            max_seconds=max_seconds,
-        )
-    except (HttpError, StopCreationLimit) as error:
-        detail = error.details if isinstance(error, StopCreationLimit) else _parse_error_reason(error)[0]
-        if detail in {"userRequestsExceedRateLimit", "rateLimitExceeded"}:
-            _log(
-                "WARN: no se pudo crear la emisión base por rate limit; "
-                "se continúa sin plantilla."
+
+def _list_scheduled_broadcasts(items: Iterable[dict[str, Any]], tz: ZoneInfo) -> list[str]:
+    scheduled_rows: list[tuple[datetime, str, str]] = []
+    for item in items:
+        snippet = item.get("snippet", {})
+        if snippet.get("actualEndTime"):
+            continue
+        scheduled_start = _parse_scheduled_start(item, tz)
+        if not scheduled_start:
+            continue
+        scheduled_rows.append(
+            (
+                scheduled_start,
+                snippet.get("title", "(sin título)"),
+                item.get("id", "(sin id)"),
             )
-            return None
-        raise
-
-    broadcasts.append(created)
-    template = find_template_by_keyword_in_items([created], keyword)
-    if template:
-        _log(f"TEMPLATE: '{template_title}' creada para reutilización.")
-    return template
+        )
+    scheduled_rows.sort(key=lambda row: row[0])
+    return [f"{row[0].isoformat()} | {row[1]} | id={row[2]}" for row in scheduled_rows]
 
 
 def _bind_stream(youtube, broadcast_id: str, stream_id: str) -> None:
@@ -541,23 +555,17 @@ def run_scheduler(youtube, config: Config) -> int:
         )
         return 0
     total_days = (end_date - start_date).days + 1
+    _log_status_list("emisiones programadas detectadas", _list_scheduled_broadcasts(broadcasts, tz))
+
     templates: dict[str, Optional[BroadcastTemplate]] = {}
     for definition in definitions:
         if definition.keyword not in templates:
             templates[definition.keyword] = _ensure_template_for_keyword(
-                youtube,
                 broadcasts,
                 definition.keyword,
-                tz,
-                config.default_privacy_status,
-                config.rate_limit_retry_limit,
-                config.rate_limit_retry_base_seconds,
-                config.rate_limit_retry_max_seconds,
             )
             if templates[definition.keyword]:
                 _log(f"TEMPLATE: '{definition.keyword}' encontrada.")
-            else:
-                _log(f"TEMPLATE: '{definition.keyword}' no encontrada, usando defaults.")
 
     shared_stream_id = _find_latest_emitted_stream_id(broadcasts)
     if not shared_stream_id:
@@ -580,7 +588,13 @@ def run_scheduler(youtube, config: Config) -> int:
                 continue
             scheduled_start = datetime.combine(target_date, definition.scheduled_time, tz)
             title = build_title(definition.prefix, target_date)
-            existing = find_broadcast_by_title_in_items(broadcasts, title)
+            existing = find_scheduled_broadcast_for_slot_in_items(
+                broadcasts,
+                title=title,
+                keyword=definition.keyword,
+                scheduled_start=scheduled_start,
+                tz=tz,
+            )
             if existing:
                 _log(f"SKIP: ya existe '{title}' (id={existing.get('id')})")
                 existing_titles.append(title)
