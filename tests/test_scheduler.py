@@ -28,6 +28,8 @@ class _FakeLiveBroadcasts:
         self.inserted_bodies = []
         self.bound_streams = []
         self.deleted_ids = []
+        self.updated_bodies = []
+        self.force_insert_chat_enabled = False
 
     def list(self, **_kwargs):
         return _FakeRequest({"items": self._items})
@@ -36,7 +38,17 @@ class _FakeLiveBroadcasts:
         body = kwargs["body"]
         self.inserted_bodies.append(body)
         title = body["snippet"]["title"]
-        return _FakeRequest({"id": f"created-{len(self.inserted_bodies)}", "snippet": {"title": title}})
+        created_payload = {
+            "id": f"created-{len(self.inserted_bodies)}",
+            "snippet": {"title": title},
+        }
+        if self.force_insert_chat_enabled:
+            created_payload["contentDetails"] = {
+                "enableLiveChat": True,
+                "enableLiveChatReplay": True,
+                "enableLiveChatSummary": True,
+            }
+        return _FakeRequest(created_payload)
 
     def bind(self, **kwargs):
         self.bound_streams.append((kwargs.get("id"), kwargs.get("streamId")))
@@ -45,6 +57,10 @@ class _FakeLiveBroadcasts:
     def delete(self, **kwargs):
         self.deleted_ids.append(kwargs.get("id"))
         return _FakeRequest({})
+
+    def update(self, **kwargs):
+        self.updated_bodies.append(kwargs["body"])
+        return _FakeRequest(kwargs["body"])
 
 
 class _FakeYoutube:
@@ -374,8 +390,8 @@ class SchedulerTests(unittest.TestCase):
         self.assertTrue(misa_10_body["monetizationDetails"]["enableMonetization"])
         self.assertFalse(misa_10_body["monetizationDetails"]["cuepointSchedule"]["enabled"])
         self.assertFalse(misa_10_body["contentDetails"]["enableLiveChat"])
-        self.assertFalse(misa_10_body["contentDetails"]["enableLiveChatReplay"])
-        self.assertFalse(misa_10_body["contentDetails"]["enableLiveChatSummary"])
+        self.assertTrue(misa_10_body["contentDetails"]["enableLiveChatReplay"])
+        self.assertTrue(misa_10_body["contentDetails"]["enableLiveChatSummary"])
 
     def test_skips_creation_when_same_slot_exists_even_with_different_title(self) -> None:
         tz = ZoneInfo("UTC")
@@ -621,6 +637,36 @@ class SchedulerTests(unittest.TestCase):
             run_scheduler(youtube, config)
 
         self.assertGreaterEqual(len(youtube._live.deleted_ids), 1)
+
+    def test_updates_created_broadcast_when_chat_is_still_enabled(self) -> None:
+        youtube = _FakeYoutube([])
+        youtube._live.force_insert_chat_enabled = True
+
+        config = Config(
+            client_id="id",
+            client_secret="secret",
+            refresh_token="token",
+            timezone="UTC",
+            default_privacy_status="unlisted",
+            keyword_misa_10="Misa 10h",
+            keyword_misa_12="Misa 12h",
+            keyword_misa_20="Misa 20h",
+            keyword_vela_21="Vela 21h",
+            start_offset_days=1,
+            max_days_ahead=1,
+            stop_on_create_limit=True,
+            rate_limit_retry_limit=1,
+            rate_limit_retry_base_seconds=0.0,
+            rate_limit_retry_max_seconds=0.0,
+            create_pause_seconds=0.0,
+        )
+
+        run_scheduler(youtube, config)
+
+        self.assertGreaterEqual(len(youtube._live.updated_bodies), 1)
+        for body in youtube._live.updated_bodies:
+            self.assertFalse(body["contentDetails"]["enableLiveChat"])
+            self.assertEqual(set(body["contentDetails"].keys()), {"enableLiveChat"})
 
 
 if __name__ == "__main__":
