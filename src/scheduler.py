@@ -60,8 +60,6 @@ DEFAULT_MONETIZATION_DETAILS = {
 }
 FORCED_CONTENT_DETAILS_DEFAULTS = {
     "enableLiveChat": False,
-    "enableLiveChatReplay": False,
-    "enableLiveChatSummary": False,
 }
 
 
@@ -429,6 +427,34 @@ def _create_broadcast(
     return request.execute()
 
 
+def _ensure_chat_disabled(youtube, created_broadcast: dict[str, Any]) -> dict[str, Any]:
+    content_details = created_broadcast.get("contentDetails", {})
+    if not content_details.get("enableLiveChat", False):
+        return created_broadcast
+
+    broadcast_id = created_broadcast.get("id")
+    if not broadcast_id:
+        return created_broadcast
+
+    request = youtube.liveBroadcasts().update(
+        part="id,contentDetails",
+        body={
+            "id": broadcast_id,
+            "contentDetails": {
+                "enableLiveChat": False,
+            },
+        },
+    )
+    updated = request.execute()
+    merged = dict(created_broadcast)
+    merged["contentDetails"] = {
+        **content_details,
+        **updated.get("contentDetails", {}),
+    }
+    _log(f"CHAT: desactivado por actualización en emisión {broadcast_id}.")
+    return merged
+
+
 def _with_rate_limit_retry(
     operation_name: str,
     title: str,
@@ -710,9 +736,10 @@ def run_scheduler(youtube, config: Config) -> int:
                     base_seconds=config.rate_limit_retry_base_seconds,
                     max_seconds=config.rate_limit_retry_max_seconds,
                 )
+                created = _ensure_chat_disabled(youtube, created)
                 created_settings = _format_creation_settings(
                     {
-                        "contentDetails": _build_content_details(template),
+                        "contentDetails": created.get("contentDetails", _build_content_details(template)),
                         "monetizationDetails": _build_monetization_details(template),
                     }
                 )
