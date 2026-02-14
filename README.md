@@ -31,18 +31,16 @@ Copia el refresh token resultante.
 
 ### Obligatorios (Secrets)
 
-Para soportar dos cuentas, define secretos por prefijo:
+Para soportar dos cuentas:
 
-- ANDRES:
-  - `ANDRES_YT_CLIENT_ID`
-  - `ANDRES_YT_CLIENT_SECRET`
-  - `ANDRES_YT_REFRESH_TOKEN`
-- CANA:
+- ANDRES (sin prefijo):
+  - `YT_CLIENT_ID`
+  - `YT_CLIENT_SECRET`
+  - `YT_REFRESH_TOKEN`
+- CANA (con prefijo):
   - `CANA_YT_CLIENT_ID`
   - `CANA_YT_CLIENT_SECRET`
   - `CANA_YT_REFRESH_TOKEN`
-
-> Compatibilidad: el workflow mantiene fallback a `YT_CLIENT_ID`, `YT_CLIENT_SECRET` y `YT_REFRESH_TOKEN` para no romper configuraciones antiguas.
 
 ### Configurables (con defaults)
 
