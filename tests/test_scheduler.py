@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timedelta
 import json
 from types import SimpleNamespace
@@ -47,6 +48,24 @@ class _FakeYoutube:
 
     def liveBroadcasts(self):
         return self._live
+
+
+class _FakeThumbnails:
+    def __init__(self):
+        self.calls = []
+
+    def set(self, **kwargs):
+        self.calls.append(kwargs)
+        return _FakeRequest({})
+
+
+class _ThumbnailUploadYoutube(_FakeYoutube):
+    def __init__(self, items):
+        super().__init__(items)
+        self._thumbs = _FakeThumbnails()
+
+    def thumbnails(self):
+        return self._thumbs
 
 
 
@@ -312,6 +331,88 @@ class SchedulerTests(unittest.TestCase):
         exit_code = run_scheduler(youtube, config)
 
         self.assertEqual(exit_code, 0)
+
+    def test_uploads_thumbnail_only_once_per_keyword(self) -> None:
+        tz = ZoneInfo("UTC")
+        today = datetime.now(tz).date()
+        template_items = [
+            {
+                "id": "template-10",
+                "snippet": {
+                    "title": "Misa 10h plantilla",
+                    "description": "Desc 10",
+                    "scheduledStartTime": datetime.combine(today, datetime.min.time(), tz).isoformat(),
+                    "thumbnails": {"high": {"url": "https://example.org/10.jpg"}},
+                },
+                "contentDetails": {},
+                "status": {"privacyStatus": "unlisted"},
+            },
+            {
+                "id": "template-12",
+                "snippet": {
+                    "title": "Misa 12h plantilla",
+                    "description": "Desc 12",
+                    "scheduledStartTime": datetime.combine(today, datetime.min.time(), tz).isoformat(),
+                    "thumbnails": {"high": {"url": "https://example.org/12.jpg"}},
+                },
+                "contentDetails": {},
+                "status": {"privacyStatus": "unlisted"},
+            },
+            {
+                "id": "template-20",
+                "snippet": {
+                    "title": "Misa 20h plantilla",
+                    "description": "Desc 20",
+                    "scheduledStartTime": datetime.combine(today, datetime.min.time(), tz).isoformat(),
+                    "thumbnails": {"high": {"url": "https://example.org/20.jpg"}},
+                },
+                "contentDetails": {},
+                "status": {"privacyStatus": "unlisted"},
+            },
+        ]
+
+        youtube = _ThumbnailUploadYoutube(template_items)
+        config = Config(
+            client_id="id",
+            client_secret="secret",
+            refresh_token="token",
+            timezone="UTC",
+            default_privacy_status="unlisted",
+            keyword_misa_10="Misa 10h",
+            keyword_misa_12="Misa 12h",
+            keyword_misa_20="Misa 20h",
+            keyword_vela_21="Vela 21h",
+            start_offset_days=1,
+            max_days_ahead=2,
+            stop_on_create_limit=True,
+            rate_limit_retry_limit=1,
+            rate_limit_retry_base_seconds=0.0,
+            rate_limit_retry_max_seconds=0.0,
+            create_pause_seconds=0.0,
+        )
+
+        class _FakeHeaders:
+            @staticmethod
+            def get_content_type():
+                return "image/jpeg"
+
+        class _FakeResponse:
+            headers = _FakeHeaders()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            @staticmethod
+            def read():
+                return b"img"
+
+        with patch("src.scheduler.urlopen", return_value=_FakeResponse()):
+            run_scheduler(youtube, config)
+
+        self.assertEqual(len(youtube._thumbs.calls), 3)
 
     def test_uses_template_description_and_shared_stream_binding(self) -> None:
         tz = ZoneInfo("UTC")
