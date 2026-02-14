@@ -2,6 +2,15 @@ name: Schedule YouTube Live broadcasts
 
 on:
   workflow_dispatch:
+    inputs:
+      target_account:
+        description: "Cuenta de YouTube a usar (CANA o ANDRES)"
+        required: true
+        default: "ANDRES"
+        type: choice
+        options:
+          - ANDRES
+          - CANA
   push:
     paths:
       - "ejecución_ahora.txt"
@@ -24,9 +33,10 @@ jobs:
           pip install -r requirements.txt
       - name: Run scheduler
         env:
-          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
-          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
-          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+          YT_TARGET_ACCOUNT: ${{ github.event_name == 'workflow_dispatch' && inputs.target_account || vars.YT_TARGET_ACCOUNT || 'CANA' }}
+          YT_CLIENT_ID: ${{ (github.event_name == 'workflow_dispatch' && inputs.target_account || vars.YT_TARGET_ACCOUNT || 'CANA') == 'ANDRES' && secrets.ANDRES_YT_CLIENT_ID || secrets.CANA_YT_CLIENT_ID || secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ (github.event_name == 'workflow_dispatch' && inputs.target_account || vars.YT_TARGET_ACCOUNT || 'CANA') == 'ANDRES' && secrets.ANDRES_YT_CLIENT_SECRET || secrets.CANA_YT_CLIENT_SECRET || secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ (github.event_name == 'workflow_dispatch' && inputs.target_account || vars.YT_TARGET_ACCOUNT || 'CANA') == 'ANDRES' && secrets.ANDRES_YT_REFRESH_TOKEN || secrets.CANA_YT_REFRESH_TOKEN || secrets.YT_REFRESH_TOKEN }}
           YT_TIMEZONE: ${{ vars.YT_TIMEZONE }}
           YT_DEFAULT_PRIVACY_STATUS: ${{ vars.YT_DEFAULT_PRIVACY_STATUS }}
           YT_KEYWORD_MISA_10: ${{ vars.YT_KEYWORD_MISA_10 }}
