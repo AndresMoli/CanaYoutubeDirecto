@@ -54,7 +54,15 @@ DEFAULT_VELA_DESCRIPTION = (
 
 DEFAULT_CATEGORY_ID = "19"  # Viajes y eventos
 DEFAULT_STATUS_DEFAULTS = {"selfDeclaredMadeForKids": False}
-DEFAULT_MONETIZATION_DETAILS = {"enableMonetization": True}
+DEFAULT_MONETIZATION_DETAILS = {
+    "enableMonetization": True,
+    "cuepointSchedule": {"enabled": False},
+}
+FORCED_CONTENT_DETAILS_DEFAULTS = {
+    "enableLiveChat": False,
+    "enableLiveChatReplay": False,
+    "enableLiveChatSummary": False,
+}
 
 
 class StopCreationLimit(Exception):
@@ -284,33 +292,63 @@ def find_template_by_keyword(youtube, keyword: str) -> Optional[BroadcastTemplat
 
 
 def _build_content_details(template: Optional[BroadcastTemplate]) -> dict[str, Any]:
-    if not template:
-        return {}
-    allowed_fields = [
-        "enableAutoStart",
-        "enableAutoStop",
-        "enableDvr",
-        "enableLowLatency",
-        "recordFromStart",
-        "latencyPreference",
-        "monitorStream",
-        "projection",
-        "enableClosedCaptions",
-        "enableEmbed",
-        "startWithSlate",
-        "enableContentEncryption",
-        "closedCaptionsType",
-        "stereoLayout",
-        "enableLiveChat",
-        "enableLiveChatReplay",
-        "enableLiveChatSummary",
-        "enableLiveChatModeration",
-    ]
-    return {
-        key: template.content_details[key]
-        for key in allowed_fields
-        if key in template.content_details
-    }
+    content_details: dict[str, Any] = {}
+    if template:
+        allowed_fields = [
+            "enableAutoStart",
+            "enableAutoStop",
+            "enableDvr",
+            "enableLowLatency",
+            "recordFromStart",
+            "latencyPreference",
+            "monitorStream",
+            "projection",
+            "enableClosedCaptions",
+            "enableEmbed",
+            "startWithSlate",
+            "enableContentEncryption",
+            "closedCaptionsType",
+            "stereoLayout",
+            "enableLiveChat",
+            "enableLiveChatReplay",
+            "enableLiveChatSummary",
+            "enableLiveChatModeration",
+        ]
+        content_details = {
+            key: template.content_details[key]
+            for key in allowed_fields
+            if key in template.content_details
+        }
+    content_details.update(FORCED_CONTENT_DETAILS_DEFAULTS)
+    return content_details
+
+
+def _format_creation_settings(created_body: dict[str, Any]) -> str:
+    monetization = created_body.get("monetizationDetails", {})
+    content_details = created_body.get("contentDetails", {})
+    return (
+        "monetización="
+        f"{monetization.get('enableMonetization', True)} | "
+        "anuncios_mid_roll_manual="
+        f"{not monetization.get('cuepointSchedule', {}).get('enabled', False)} | "
+        "chat_directo="
+        f"{content_details.get('enableLiveChat', False)} | "
+        "chat_replay="
+        f"{content_details.get('enableLiveChatReplay', False)} | "
+        "chat_resumen="
+        f"{content_details.get('enableLiveChatSummary', False)}"
+    )
+
+
+
+
+def _build_monetization_details(template: Optional[BroadcastTemplate]) -> dict[str, Any]:
+    monetization_details = dict(DEFAULT_MONETIZATION_DETAILS)
+    if template:
+        monetization_details.update(template.monetization_details)
+    monetization_details["enableMonetization"] = True
+    monetization_details["cuepointSchedule"] = {"enabled": False}
+    return monetization_details
 
 
 def _parse_error_reason(error: HttpError) -> tuple[str | None, str | None]:
@@ -382,10 +420,7 @@ def _create_broadcast(
     if template:
         body["status"].update(template.status_defaults)
 
-    monetization_details = dict(DEFAULT_MONETIZATION_DETAILS)
-    if template:
-        monetization_details.update(template.monetization_details)
-    body["monetizationDetails"] = monetization_details
+    body["monetizationDetails"] = _build_monetization_details(template)
 
     request = youtube.liveBroadcasts().insert(
         part="snippet,contentDetails,status,monetizationDetails",
@@ -675,7 +710,13 @@ def run_scheduler(youtube, config: Config) -> int:
                     base_seconds=config.rate_limit_retry_base_seconds,
                     max_seconds=config.rate_limit_retry_max_seconds,
                 )
-                _log(f"CREATED: '{title}' (id={created.get('id')})")
+                created_settings = _format_creation_settings(
+                    {
+                        "contentDetails": _build_content_details(template),
+                        "monetizationDetails": _build_monetization_details(template),
+                    }
+                )
+                _log(f"CREATED: '{title}' (id={created.get('id')}) | {created_settings}")
                 created_titles.append(title)
                 created_id = created.get("id")
                 if created_id and not _ensure_thumbnail(youtube, created_id, template, title):

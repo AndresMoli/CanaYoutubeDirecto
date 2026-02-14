@@ -322,11 +322,18 @@ class SchedulerTests(unittest.TestCase):
             "contentDetails": {
                 "enableLowLatency": True,
                 "enableDvr": False,
+                "enableLiveChat": True,
+                "enableLiveChatReplay": True,
+                "enableLiveChatSummary": True,
                 "boundStreamId": "stream-emitted",
             },
             "status": {
                 "privacyStatus": "unlisted",
                 "selfDeclaredMadeForKids": False,
+            },
+            "monetizationDetails": {
+                "enableMonetization": False,
+                "cuepointSchedule": {"enabled": True},
             },
         }
 
@@ -365,6 +372,10 @@ class SchedulerTests(unittest.TestCase):
         self.assertTrue(misa_10_body["contentDetails"]["enableLowLatency"])
         self.assertFalse(misa_10_body["contentDetails"]["enableDvr"])
         self.assertTrue(misa_10_body["monetizationDetails"]["enableMonetization"])
+        self.assertFalse(misa_10_body["monetizationDetails"]["cuepointSchedule"]["enabled"])
+        self.assertFalse(misa_10_body["contentDetails"]["enableLiveChat"])
+        self.assertFalse(misa_10_body["contentDetails"]["enableLiveChatReplay"])
+        self.assertFalse(misa_10_body["contentDetails"]["enableLiveChatSummary"])
 
     def test_skips_creation_when_same_slot_exists_even_with_different_title(self) -> None:
         tz = ZoneInfo("UTC")
