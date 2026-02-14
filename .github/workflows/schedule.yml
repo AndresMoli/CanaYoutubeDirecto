@@ -12,6 +12,8 @@ on:
           - ANDRES
           - CANA
   push:
+    branches:
+      - main
     paths:
       - "src/**"
       - "ejecución_ahora.txt"
