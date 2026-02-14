@@ -55,7 +55,7 @@ DEFAULT_VELA_DESCRIPTION = (
 DEFAULT_CATEGORY_ID = "19"  # Viajes y eventos
 DEFAULT_STATUS_DEFAULTS = {"selfDeclaredMadeForKids": False}
 DEFAULT_MONETIZATION_DETAILS = {
-    "enableMonetization": True,
+    "adsMonetizationStatus": "on",
     "cuepointSchedule": {"enabled": False},
 }
 FORCED_CONTENT_DETAILS_DEFAULTS = {
@@ -186,7 +186,7 @@ def _pick_status_defaults(status: dict[str, Any]) -> dict[str, Any]:
 
 
 def _pick_monetization_defaults(monetization_details: dict[str, Any]) -> dict[str, Any]:
-    allowed_fields = ["enableMonetization", "cuepointSchedule"]
+    allowed_fields = ["adsMonetizationStatus", "cuepointSchedule"]
     return {
         key: monetization_details[key]
         for key in allowed_fields
@@ -326,7 +326,7 @@ def _format_creation_settings(created_body: dict[str, Any]) -> str:
     content_details = created_body.get("contentDetails", {})
     return (
         "monetización="
-        f"{monetization.get('enableMonetization', True)} | "
+        f"{monetization.get('adsMonetizationStatus', 'on')} | "
         "anuncios_mid_roll_manual="
         f"{not monetization.get('cuepointSchedule', {}).get('enabled', False)} | "
         "chat_directo="
@@ -344,7 +344,7 @@ def _build_monetization_details(template: Optional[BroadcastTemplate]) -> dict[s
     monetization_details = dict(DEFAULT_MONETIZATION_DETAILS)
     if template:
         monetization_details.update(template.monetization_details)
-    monetization_details["enableMonetization"] = True
+    monetization_details["adsMonetizationStatus"] = "on"
     monetization_details["cuepointSchedule"] = {"enabled": False}
     return monetization_details
 
@@ -676,7 +676,7 @@ def _log_template_copy_plan(keyword: str, template: Optional[BroadcastTemplate])
         f"portada={bool(template.thumbnail_url)} | clave_emisión={template.bound_stream_id or 'N/A'} | "
         f"descripción={bool(template.description)} | categoría={template.snippet_defaults.get('categoryId', DEFAULT_CATEGORY_ID)} | "
         f"audiencia={template.status_defaults.get('selfDeclaredMadeForKids', False)} | "
-        f"monetización={template.monetization_details.get('enableMonetization', True)} | "
+        f"monetización={template.monetization_details.get('adsMonetizationStatus', 'on')} | "
         f"chat={template.content_details.get('enableLiveChat', 'N/A')}"
     )
 

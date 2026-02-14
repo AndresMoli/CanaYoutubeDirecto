@@ -369,7 +369,7 @@ class SchedulerTests(unittest.TestCase):
                 "selfDeclaredMadeForKids": False,
             },
             "monetizationDetails": {
-                "enableMonetization": False,
+                "adsMonetizationStatus": "off",
                 "cuepointSchedule": {"enabled": True},
             },
         }
@@ -408,7 +408,7 @@ class SchedulerTests(unittest.TestCase):
         self.assertFalse(misa_10_body["status"]["selfDeclaredMadeForKids"])
         self.assertTrue(misa_10_body["contentDetails"]["enableLowLatency"])
         self.assertFalse(misa_10_body["contentDetails"]["enableDvr"])
-        self.assertTrue(misa_10_body["monetizationDetails"]["enableMonetization"])
+        self.assertEqual(misa_10_body["monetizationDetails"]["adsMonetizationStatus"], "on")
         self.assertFalse(misa_10_body["monetizationDetails"]["cuepointSchedule"]["enabled"])
         self.assertFalse(misa_10_body["contentDetails"]["enableLiveChat"])
         self.assertTrue(misa_10_body["contentDetails"]["enableLiveChatReplay"])
