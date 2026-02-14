@@ -44,9 +44,28 @@ class StudioBroadcastCreator(AbstractContextManager["StudioBroadcastCreator"]):
         self._page = None
 
     def __enter__(self) -> "StudioBroadcastCreator":
+        if self._storage_state_path.is_dir():
+            candidate = self._storage_state_path / "storage_state.json"
+            if candidate.is_file():
+                self._storage_state_path = candidate
+                _log(
+                    "STUDIO: YT_STUDIO_STORAGE_STATE_PATH es un directorio; "
+                    f"usando {self._storage_state_path}."
+                )
+            else:
+                raise StudioCreationError(
+                    "YT_STUDIO_STORAGE_STATE_PATH apunta a un directorio. "
+                    "Debe apuntar a un archivo JSON (por ejemplo: storage_state.json)."
+                )
+
         if not self._storage_state_path.exists():
             raise StudioCreationError(
                 f"No existe YT_STUDIO_STORAGE_STATE_PATH: {self._storage_state_path}"
+            )
+        if not self._storage_state_path.is_file():
+            raise StudioCreationError(
+                "YT_STUDIO_STORAGE_STATE_PATH debe ser un archivo JSON válido. "
+                f"Valor actual: {self._storage_state_path}"
             )
         _log(f"STUDIO: usando storage state en {self._storage_state_path}.")
         try:
