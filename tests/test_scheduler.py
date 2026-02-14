@@ -25,13 +25,26 @@ class _FakeRequest:
 class _FakeLiveBroadcasts:
     def __init__(self, items):
         self._items = items
+        self._created_by_id = {}
         self.inserted_bodies = []
         self.bound_streams = []
         self.deleted_ids = []
         self.updated_bodies = []
         self.force_insert_chat_enabled = False
+        self.force_list_chat_enabled = False
 
-    def list(self, **_kwargs):
+    def list(self, **kwargs):
+        broadcast_id = kwargs.get("id")
+        if broadcast_id:
+            item = self._created_by_id.get(broadcast_id)
+            if item:
+                listed_item = dict(item)
+                listed_content = dict(listed_item.get("contentDetails", {}))
+                if self.force_list_chat_enabled:
+                    listed_content["enableLiveChat"] = True
+                listed_item["contentDetails"] = listed_content
+                return _FakeRequest({"items": [listed_item]})
+            return _FakeRequest({"items": []})
         return _FakeRequest({"items": self._items})
 
     def insert(self, **kwargs):
@@ -48,6 +61,7 @@ class _FakeLiveBroadcasts:
                 "enableLiveChatReplay": True,
                 "enableLiveChatSummary": True,
             }
+        self._created_by_id[created_payload["id"]] = created_payload
         return _FakeRequest(created_payload)
 
     def bind(self, **kwargs):
@@ -59,7 +73,14 @@ class _FakeLiveBroadcasts:
         return _FakeRequest({})
 
     def update(self, **kwargs):
-        self.updated_bodies.append(kwargs["body"])
+        body = kwargs["body"]
+        self.updated_bodies.append(body)
+        item = self._created_by_id.get(body.get("id"))
+        if item:
+            item["contentDetails"] = {
+                **item.get("contentDetails", {}),
+                **body.get("contentDetails", {}),
+            }
         return _FakeRequest(kwargs["body"])
 
 
@@ -667,6 +688,35 @@ class SchedulerTests(unittest.TestCase):
         for body in youtube._live.updated_bodies:
             self.assertFalse(body["contentDetails"]["enableLiveChat"])
             self.assertEqual(set(body["contentDetails"].keys()), {"enableLiveChat"})
+
+    def test_updates_created_broadcast_when_verification_detects_live_chat_enabled(self) -> None:
+        youtube = _FakeYoutube([])
+        youtube._live.force_list_chat_enabled = True
+
+        config = Config(
+            client_id="id",
+            client_secret="secret",
+            refresh_token="token",
+            timezone="UTC",
+            default_privacy_status="unlisted",
+            keyword_misa_10="Misa 10h",
+            keyword_misa_12="Misa 12h",
+            keyword_misa_20="Misa 20h",
+            keyword_vela_21="Vela 21h",
+            start_offset_days=1,
+            max_days_ahead=1,
+            stop_on_create_limit=True,
+            rate_limit_retry_limit=1,
+            rate_limit_retry_base_seconds=0.0,
+            rate_limit_retry_max_seconds=0.0,
+            create_pause_seconds=0.0,
+        )
+
+        run_scheduler(youtube, config)
+
+        self.assertGreaterEqual(len(youtube._live.updated_bodies), 1)
+        for body in youtube._live.updated_bodies:
+            self.assertFalse(body["contentDetails"]["enableLiveChat"])
 
 
 if __name__ == "__main__":
