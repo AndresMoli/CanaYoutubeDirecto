@@ -493,7 +493,7 @@ def _with_rate_limit_retry(
                 )
             wait_seconds = min(max_seconds, base_seconds * (2**attempt)) + random.uniform(0, 0.5)
             _log(
-                f"WARN: rate limit en {operation_name} para '{title}' "
+                f"WARN: rate limit transitorio en {operation_name} para '{title}' "
                 f"(intento {attempt + 1}/{retry_limit + 1}), reintentando en {wait_seconds:.2f}s."
             )
             sleep(wait_seconds)
