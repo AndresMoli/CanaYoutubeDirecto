@@ -24,7 +24,9 @@ class BroadcastTemplate:
     privacy_status: str
     bound_stream_id: Optional[str]
     description: str
+    snippet_defaults: dict[str, Any]
     thumbnail_url: Optional[str]
+    from_emitted: bool
 
 
 @dataclass(frozen=True)
@@ -130,6 +132,11 @@ def find_latest_scheduled_broadcast_in_items(
     return latest
 
 
+def _pick_snippet_defaults(snippet: dict[str, Any]) -> dict[str, Any]:
+    allowed_fields = ["defaultLanguage", "defaultAudioLanguage"]
+    return {key: snippet[key] for key in allowed_fields if key in snippet}
+
+
 def _pick_thumbnail_url(snippet: dict[str, Any]) -> Optional[str]:
     thumbnails = snippet.get("thumbnails", {})
     for key in ("maxres", "standard", "high", "medium", "default"):
@@ -139,23 +146,70 @@ def _pick_thumbnail_url(snippet: dict[str, Any]) -> Optional[str]:
     return None
 
 
+def _parse_item_datetime(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=ZoneInfo("UTC"))
+    return parsed
+
+
+def _build_template_from_item(item: dict[str, Any], *, from_emitted: bool) -> BroadcastTemplate:
+    content_details = item.get("contentDetails", {})
+    status = item.get("status", {})
+    snippet = item.get("snippet", {})
+    return BroadcastTemplate(
+        content_details=content_details,
+        privacy_status=status.get("privacyStatus", "unlisted"),
+        bound_stream_id=content_details.get("boundStreamId"),
+        description=snippet.get("description", ""),
+        snippet_defaults=_pick_snippet_defaults(snippet),
+        thumbnail_url=_pick_thumbnail_url(snippet),
+        from_emitted=from_emitted,
+    )
+
+
 def find_template_by_keyword_in_items(
     items: Iterable[dict[str, Any]], keyword: str
 ) -> Optional[BroadcastTemplate]:
-    for item in items:
-        title = item.get("snippet", {}).get("title", "")
-        if keyword in title:
-            content_details = item.get("contentDetails", {})
-            status = item.get("status", {})
-            snippet = item.get("snippet", {})
-            return BroadcastTemplate(
-                content_details=content_details,
-                privacy_status=status.get("privacyStatus", "unlisted"),
-                bound_stream_id=content_details.get("boundStreamId"),
-                description=snippet.get("description", ""),
-                thumbnail_url=_pick_thumbnail_url(snippet),
-            )
-    return None
+    candidates = [item for item in items if keyword in item.get("snippet", {}).get("title", "")]
+    if not candidates:
+        return None
+
+    emitted = [item for item in candidates if item.get("snippet", {}).get("actualEndTime")]
+    if emitted:
+        latest_emitted = max(
+            emitted,
+            key=lambda item: _parse_item_datetime(item.get("snippet", {}).get("actualEndTime"))
+            or datetime.min.replace(tzinfo=ZoneInfo("UTC")),
+        )
+        return _build_template_from_item(latest_emitted, from_emitted=True)
+
+    scheduled_with_metadata = [
+        item
+        for item in candidates
+        if item.get("snippet", {}).get("description")
+        or item.get("contentDetails", {}).get("boundStreamId")
+        or item.get("snippet", {}).get("thumbnails")
+    ]
+    if scheduled_with_metadata:
+        latest_scheduled = max(
+            scheduled_with_metadata,
+            key=lambda item: _parse_item_datetime(item.get("snippet", {}).get("scheduledStartTime"))
+            or datetime.min.replace(tzinfo=ZoneInfo("UTC")),
+        )
+        return _build_template_from_item(latest_scheduled, from_emitted=False)
+
+    latest_any = max(
+        candidates,
+        key=lambda item: _parse_item_datetime(item.get("snippet", {}).get("scheduledStartTime"))
+        or datetime.min.replace(tzinfo=ZoneInfo("UTC")),
+    )
+    return _build_template_from_item(latest_any, from_emitted=False)
 
 
 def find_broadcast_by_title(youtube, title: str) -> Optional[dict[str, Any]]:
@@ -185,6 +239,9 @@ def _build_content_details(template: Optional[BroadcastTemplate]) -> dict[str, A
         "latencyPreference",
         "monitorStream",
         "projection",
+        "enableClosedCaptions",
+        "enableEmbed",
+        "startWithSlate",
     ]
     return {
         key: template.content_details[key]
@@ -241,12 +298,16 @@ def _create_broadcast(
     template: Optional[BroadcastTemplate],
     default_privacy_status: str,
 ) -> dict[str, Any]:
+    snippet = {
+        "title": title,
+        "description": description,
+        "scheduledStartTime": _rfc3339(scheduled_start),
+    }
+    if template:
+        snippet.update(template.snippet_defaults)
+
     body = {
-        "snippet": {
-            "title": title,
-            "description": description,
-            "scheduledStartTime": _rfc3339(scheduled_start),
-        },
+        "snippet": snippet,
         "status": {
             "privacyStatus": template.privacy_status if template else default_privacy_status,
         },
@@ -391,6 +452,23 @@ def _bind_stream_with_retry(
     )
 
 
+def _find_latest_emitted_stream_id(items: Iterable[dict[str, Any]]) -> Optional[str]:
+    emitted_with_stream = [
+        item
+        for item in items
+        if item.get("snippet", {}).get("actualEndTime")
+        and item.get("contentDetails", {}).get("boundStreamId")
+    ]
+    if not emitted_with_stream:
+        return None
+    latest = max(
+        emitted_with_stream,
+        key=lambda item: _parse_item_datetime(item.get("snippet", {}).get("actualEndTime"))
+        or datetime.min.replace(tzinfo=ZoneInfo("UTC")),
+    )
+    return latest.get("contentDetails", {}).get("boundStreamId")
+
+
 def _set_thumbnail_from_url(youtube, video_id: str, thumbnail_url: str) -> None:
     with urlopen(thumbnail_url) as response:
         content_type = response.headers.get_content_type()
@@ -403,8 +481,8 @@ def _set_thumbnail_from_url(youtube, video_id: str, thumbnail_url: str) -> None:
     youtube.thumbnails().set(videoId=video_id, media_body=media).execute()
 
 
-def _copy_thumbnail_if_available(youtube, broadcast_id: str, template: Optional[BroadcastTemplate]) -> None:
-    if not template or not template.thumbnail_url:
+def _copy_thumbnail_if_fallback(youtube, broadcast_id: str, template: Optional[BroadcastTemplate]) -> None:
+    if not template or not template.thumbnail_url or template.from_emitted:
         return
     if not hasattr(youtube, "thumbnails"):
         return
@@ -445,7 +523,7 @@ def run_scheduler(youtube, config: Config) -> int:
     start_date = today + timedelta(days=config.start_offset_days)
     broadcasts = list(_iter_broadcasts(youtube))
     _log(f"START: procesando desde {start_date.isoformat()} (sin saltar huecos).")
-    max_days_ahead = min(config.max_days_ahead, 7)
+    max_days_ahead = min(config.max_days_ahead, 15)
     end_date = today + timedelta(days=max_days_ahead)
     if start_date > end_date:
         _log(
@@ -472,7 +550,9 @@ def run_scheduler(youtube, config: Config) -> int:
             else:
                 _log(f"TEMPLATE: '{definition.keyword}' no encontrada, usando defaults.")
 
-    shared_stream_id = next((t.bound_stream_id for t in templates.values() if t and t.bound_stream_id), None)
+    shared_stream_id = _find_latest_emitted_stream_id(broadcasts)
+    if not shared_stream_id:
+        shared_stream_id = next((t.bound_stream_id for t in templates.values() if t and t.bound_stream_id), None)
 
     planned: list[str] = []
     created_titles: list[str] = []
@@ -525,7 +605,7 @@ def run_scheduler(youtube, config: Config) -> int:
                         config.rate_limit_retry_max_seconds,
                     )
                     _log(f"BIND: broadcast {created.get('id')} -> stream {stream_id}")
-                _copy_thumbnail_if_available(youtube, created.get("id"), template)
+                _copy_thumbnail_if_fallback(youtube, created.get("id"), template)
                 sleep(config.create_pause_seconds)
             except StopCreationLimit as limit_error:
                 if config.stop_on_create_limit:
