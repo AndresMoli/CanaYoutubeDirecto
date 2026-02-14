@@ -33,11 +33,11 @@ Copia el refresh token resultante.
 
 Para soportar dos cuentas:
 
-- ANDRES (sin prefijo):
+- ANDRES:
   - `YT_CLIENT_ID`
   - `YT_CLIENT_SECRET`
   - `YT_REFRESH_TOKEN`
-- CANA (con prefijo):
+- CANA:
   - `CANA_YT_CLIENT_ID`
   - `CANA_YT_CLIENT_SECRET`
   - `CANA_YT_REFRESH_TOKEN`
