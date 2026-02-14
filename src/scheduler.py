@@ -26,8 +26,11 @@ class BroadcastTemplate:
     bound_stream_id: Optional[str]
     description: str
     snippet_defaults: dict[str, Any]
+    monetization_details: dict[str, Any]
     thumbnail_url: Optional[str]
     from_emitted: bool
+    source_id: str
+    source_title: str
 
 
 @dataclass(frozen=True)
@@ -48,6 +51,10 @@ DEFAULT_VELA_DESCRIPTION = (
     "También puedes oírlas después en Spotify:\n"
     "https://open.spotify.com/show/1XitO8Ckw0kDvDTT9CuVp2"
 )
+
+DEFAULT_CATEGORY_ID = "19"  # Viajes y eventos
+DEFAULT_STATUS_DEFAULTS = {"selfDeclaredMadeForKids": False}
+DEFAULT_MONETIZATION_DETAILS = {"enableMonetization": True}
 
 
 class StopCreationLimit(Exception):
@@ -80,7 +87,7 @@ def _iter_broadcasts(youtube, page_size: int = 50) -> Iterable[dict[str, Any]]:
     page_token = None
     while True:
         request = youtube.liveBroadcasts().list(
-            part="id,snippet,contentDetails,status",
+            part="id,snippet,contentDetails,status,monetizationDetails",
             mine=True,
             maxResults=page_size,
             pageToken=page_token,
@@ -172,6 +179,15 @@ def _pick_status_defaults(status: dict[str, Any]) -> dict[str, Any]:
     return {key: status[key] for key in allowed_fields if key in status}
 
 
+def _pick_monetization_defaults(monetization_details: dict[str, Any]) -> dict[str, Any]:
+    allowed_fields = ["enableMonetization", "cuepointSchedule"]
+    return {
+        key: monetization_details[key]
+        for key in allowed_fields
+        if key in monetization_details
+    }
+
+
 def _pick_thumbnail_url(snippet: dict[str, Any]) -> Optional[str]:
     thumbnails = snippet.get("thumbnails", {})
     for key in ("maxres", "standard", "high", "medium", "default"):
@@ -204,8 +220,11 @@ def _build_template_from_item(item: dict[str, Any], *, from_emitted: bool) -> Br
         bound_stream_id=content_details.get("boundStreamId"),
         description=snippet.get("description", ""),
         snippet_defaults=_pick_snippet_defaults(snippet),
+        monetization_details=_pick_monetization_defaults(item.get("monetizationDetails", {})),
         thumbnail_url=_pick_thumbnail_url(snippet),
         from_emitted=from_emitted,
+        source_id=item.get("id", "(sin id)"),
+        source_title=snippet.get("title", "(sin título)"),
     )
 
 
@@ -279,6 +298,13 @@ def _build_content_details(template: Optional[BroadcastTemplate]) -> dict[str, A
         "enableClosedCaptions",
         "enableEmbed",
         "startWithSlate",
+        "enableContentEncryption",
+        "closedCaptionsType",
+        "stereoLayout",
+        "enableLiveChat",
+        "enableLiveChatReplay",
+        "enableLiveChatSummary",
+        "enableLiveChatModeration",
     ]
     return {
         key: template.content_details[key]
@@ -340,8 +366,10 @@ def _create_broadcast(
         "description": description,
         "scheduledStartTime": _rfc3339(scheduled_start),
     }
+    snippet_defaults = {"categoryId": DEFAULT_CATEGORY_ID}
     if template:
-        snippet.update(template.snippet_defaults)
+        snippet_defaults.update(template.snippet_defaults)
+    snippet.update(snippet_defaults)
 
     body = {
         "snippet": snippet,
@@ -350,10 +378,17 @@ def _create_broadcast(
         },
         "contentDetails": _build_content_details(template),
     }
+    body["status"].update(DEFAULT_STATUS_DEFAULTS)
     if template:
         body["status"].update(template.status_defaults)
+
+    monetization_details = dict(DEFAULT_MONETIZATION_DETAILS)
+    if template:
+        monetization_details.update(template.monetization_details)
+    body["monetizationDetails"] = monetization_details
+
     request = youtube.liveBroadcasts().insert(
-        part="snippet,contentDetails,status",
+        part="snippet,contentDetails,status,monetizationDetails",
         body=body,
     )
     return request.execute()
@@ -420,12 +455,8 @@ def _ensure_template_for_keyword(
     keyword: str,
 ) -> Optional[BroadcastTemplate]:
     template = find_template_by_keyword_in_items(broadcasts, keyword)
-    if template:
-        return template
-    _log(
-        f"TEMPLATE: '{keyword}' no encontrada en emisiones anteriores; se usan valores por defecto."
-    )
-    return None
+    _log_template_copy_plan(keyword, template)
+    return template
 
 
 def _list_scheduled_broadcasts(items: Iterable[dict[str, Any]], tz: ZoneInfo) -> list[str]:
@@ -454,6 +485,11 @@ def _bind_stream(youtube, broadcast_id: str, stream_id: str) -> None:
         id=broadcast_id,
         streamId=stream_id,
     )
+    request.execute()
+
+
+def _delete_broadcast(youtube, broadcast_id: str) -> None:
+    request = youtube.liveBroadcasts().delete(id=broadcast_id)
     request.execute()
 
 
@@ -505,25 +541,42 @@ def _set_thumbnail_from_url(youtube, video_id: str, thumbnail_url: str) -> None:
     youtube.thumbnails().set(videoId=video_id, media_body=media).execute()
 
 
-def _copy_thumbnail_if_fallback(
+def _ensure_thumbnail(
     youtube,
     broadcast_id: str,
     template: Optional[BroadcastTemplate],
-    keyword: str,
-    copied_keywords: set[str],
-) -> None:
-    if keyword in copied_keywords:
-        return
-    if not template or not template.thumbnail_url or template.from_emitted:
-        return
+    title: str,
+) -> bool:
     if not hasattr(youtube, "thumbnails"):
-        return
+        _log(f"WARN: API thumbnails no disponible para '{title}', no se puede validar miniatura.")
+        return True
+    if not template or not template.thumbnail_url:
+        _log(f"ERROR: '{title}' sin miniatura de plantilla para replicar.")
+        return False
     try:
         _set_thumbnail_from_url(youtube, broadcast_id, template.thumbnail_url)
-        copied_keywords.add(keyword)
         _log(f"THUMBNAIL: broadcast {broadcast_id} <- {template.thumbnail_url}")
+        return True
     except Exception as error:
-        _log(f"WARN: no se pudo copiar portada en {broadcast_id}: {error}")
+        _log(f"ERROR: no se pudo copiar portada en {broadcast_id}: {error}")
+        return False
+
+
+def _log_template_copy_plan(keyword: str, template: Optional[BroadcastTemplate]) -> None:
+    if not template:
+        _log(
+            f"TEMPLATE: '{keyword}' no encontrada en emisiones anteriores; se usarán defaults "
+            "(categoría=Viajes y eventos, audiencia=no niños, monetización=activada)."
+        )
+        return
+    _log(
+        f"REPLICA: keyword='{keyword}' desde '{template.source_title}' (id={template.source_id}) | "
+        f"portada={bool(template.thumbnail_url)} | clave_emisión={template.bound_stream_id or 'N/A'} | "
+        f"descripción={bool(template.description)} | categoría={template.snippet_defaults.get('categoryId', DEFAULT_CATEGORY_ID)} | "
+        f"audiencia={template.status_defaults.get('selfDeclaredMadeForKids', False)} | "
+        f"monetización={template.monetization_details.get('enableMonetization', True)} | "
+        f"chat={template.content_details.get('enableLiveChat', 'N/A')}"
+    )
 
 
 def _log_status_list(title: str, items: list[str]) -> None:
@@ -585,8 +638,6 @@ def run_scheduler(youtube, config: Config) -> int:
     created_titles: list[str] = []
     existing_titles: list[str] = []
     failed: list[str] = []
-    copied_thumbnail_keywords: set[str] = set()
-
     for offset in range(total_days):
         target_date = start_date + timedelta(days=offset)
         _log(f"DAY: procesando {target_date.isoformat()}")
@@ -626,6 +677,12 @@ def run_scheduler(youtube, config: Config) -> int:
                 )
                 _log(f"CREATED: '{title}' (id={created.get('id')})")
                 created_titles.append(title)
+                created_id = created.get("id")
+                if created_id and not _ensure_thumbnail(youtube, created_id, template, title):
+                    _delete_broadcast(youtube, created_id)
+                    failed.append(f"{title} (miniatura no replicada)")
+                    created_titles.pop()
+                    continue
                 broadcasts.append(created)
                 stream_id = shared_stream_id
                 if stream_id:
@@ -639,13 +696,6 @@ def run_scheduler(youtube, config: Config) -> int:
                         config.rate_limit_retry_max_seconds,
                     )
                     _log(f"BIND: broadcast {created.get('id')} -> stream {stream_id}")
-                _copy_thumbnail_if_fallback(
-                    youtube,
-                    created.get("id"),
-                    template,
-                    definition.keyword,
-                    copied_thumbnail_keywords,
-                )
                 sleep(config.create_pause_seconds)
             except StopCreationLimit as limit_error:
                 if config.stop_on_create_limit:
