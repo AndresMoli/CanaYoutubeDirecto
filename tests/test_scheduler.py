@@ -27,6 +27,7 @@ class _FakeLiveBroadcasts:
         self._items = items
         self.inserted_bodies = []
         self.bound_streams = []
+        self.deleted_ids = []
 
     def list(self, **_kwargs):
         return _FakeRequest({"items": self._items})
@@ -39,6 +40,10 @@ class _FakeLiveBroadcasts:
 
     def bind(self, **kwargs):
         self.bound_streams.append((kwargs.get("id"), kwargs.get("streamId")))
+        return _FakeRequest({})
+
+    def delete(self, **kwargs):
+        self.deleted_ids.append(kwargs.get("id"))
         return _FakeRequest({})
 
 
@@ -359,6 +364,7 @@ class SchedulerTests(unittest.TestCase):
         self.assertFalse(misa_10_body["status"]["selfDeclaredMadeForKids"])
         self.assertTrue(misa_10_body["contentDetails"]["enableLowLatency"])
         self.assertFalse(misa_10_body["contentDetails"]["enableDvr"])
+        self.assertTrue(misa_10_body["monetizationDetails"]["enableMonetization"])
 
     def test_skips_creation_when_same_slot_exists_even_with_different_title(self) -> None:
         tz = ZoneInfo("UTC")
@@ -425,7 +431,7 @@ class SchedulerTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
 
-    def test_uploads_thumbnail_only_once_per_keyword(self) -> None:
+    def test_uploads_thumbnail_for_each_created_broadcast(self) -> None:
         tz = ZoneInfo("UTC")
         today = datetime.now(tz).date()
         template_items = [
@@ -505,7 +511,7 @@ class SchedulerTests(unittest.TestCase):
         with patch("src.scheduler.urlopen", return_value=_FakeResponse()):
             run_scheduler(youtube, config)
 
-        self.assertEqual(len(youtube._thumbs.calls), 3)
+        self.assertGreaterEqual(len(youtube._thumbs.calls), 6)
 
     def test_uses_template_description_and_shared_stream_binding(self) -> None:
         tz = ZoneInfo("UTC")
@@ -563,6 +569,47 @@ class SchedulerTests(unittest.TestCase):
         vela_title = build_title("Vela 21h", tomorrow)
         if tomorrow.weekday() == 3:
             self.assertEqual(description_by_title[vela_title], DEFAULT_VELA_DESCRIPTION)
+
+    def test_deletes_broadcast_if_thumbnail_cannot_be_replicated(self) -> None:
+        tz = ZoneInfo("UTC")
+        today = datetime.now(tz).date()
+        template_item = {
+            "id": "latest-emitted-10",
+            "snippet": {
+                "title": "Misa 10h última",
+                "description": "Desc última 10",
+                "scheduledStartTime": datetime.combine(today - timedelta(days=1), datetime.min.time(), tz).isoformat(),
+                "actualEndTime": datetime.combine(today - timedelta(days=1), datetime.min.time(), tz).isoformat(),
+                "thumbnails": {"high": {"url": "https://example.org/fail.jpg"}},
+            },
+            "contentDetails": {"boundStreamId": "stream-emitted"},
+            "status": {"privacyStatus": "unlisted"},
+        }
+
+        youtube = _ThumbnailUploadYoutube([template_item])
+        config = Config(
+            client_id="id",
+            client_secret="secret",
+            refresh_token="token",
+            timezone="UTC",
+            default_privacy_status="unlisted",
+            keyword_misa_10="Misa 10h",
+            keyword_misa_12="Misa 12h",
+            keyword_misa_20="Misa 20h",
+            keyword_vela_21="Vela 21h",
+            start_offset_days=1,
+            max_days_ahead=1,
+            stop_on_create_limit=True,
+            rate_limit_retry_limit=1,
+            rate_limit_retry_base_seconds=0.0,
+            rate_limit_retry_max_seconds=0.0,
+            create_pause_seconds=0.0,
+        )
+
+        with patch("src.scheduler.urlopen", side_effect=RuntimeError("download failed")):
+            run_scheduler(youtube, config)
+
+        self.assertGreaterEqual(len(youtube._live.deleted_ids), 1)
 
 
 if __name__ == "__main__":
