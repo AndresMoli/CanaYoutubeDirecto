@@ -22,6 +22,7 @@ from .title_format import build_title
 class BroadcastTemplate:
     content_details: dict[str, Any]
     privacy_status: str
+    status_defaults: dict[str, Any]
     bound_stream_id: Optional[str]
     description: str
     snippet_defaults: dict[str, Any]
@@ -162,8 +163,13 @@ def find_latest_scheduled_broadcast_in_items(
 
 
 def _pick_snippet_defaults(snippet: dict[str, Any]) -> dict[str, Any]:
-    allowed_fields = ["defaultLanguage", "defaultAudioLanguage"]
+    allowed_fields = ["defaultLanguage", "defaultAudioLanguage", "categoryId"]
     return {key: snippet[key] for key in allowed_fields if key in snippet}
+
+
+def _pick_status_defaults(status: dict[str, Any]) -> dict[str, Any]:
+    allowed_fields = ["selfDeclaredMadeForKids"]
+    return {key: status[key] for key in allowed_fields if key in status}
 
 
 def _pick_thumbnail_url(snippet: dict[str, Any]) -> Optional[str]:
@@ -194,6 +200,7 @@ def _build_template_from_item(item: dict[str, Any], *, from_emitted: bool) -> Br
     return BroadcastTemplate(
         content_details=content_details,
         privacy_status=status.get("privacyStatus", "unlisted"),
+        status_defaults=_pick_status_defaults(status),
         bound_stream_id=content_details.get("boundStreamId"),
         description=snippet.get("description", ""),
         snippet_defaults=_pick_snippet_defaults(snippet),
@@ -264,6 +271,7 @@ def _build_content_details(template: Optional[BroadcastTemplate]) -> dict[str, A
         "enableAutoStart",
         "enableAutoStop",
         "enableDvr",
+        "enableLowLatency",
         "recordFromStart",
         "latencyPreference",
         "monitorStream",
@@ -342,6 +350,8 @@ def _create_broadcast(
         },
         "contentDetails": _build_content_details(template),
     }
+    if template:
+        body["status"].update(template.status_defaults)
     request = youtube.liveBroadcasts().insert(
         part="snippet,contentDetails,status",
         body=body,

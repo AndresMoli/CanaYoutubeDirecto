@@ -302,6 +302,64 @@ class SchedulerTests(unittest.TestCase):
         self.assertEqual(description_by_title[misa_10_title], "Desc última 10")
         self.assertEqual(description_by_title[misa_12_title], "Desc última 12")
 
+    def test_copies_category_audience_and_chat_settings_from_latest_emitted(self) -> None:
+        tz = ZoneInfo("UTC")
+        today = datetime.now(tz).date()
+        template_item = {
+            "id": "latest-emitted-10",
+            "snippet": {
+                "title": "Misa 10h última",
+                "description": "Desc última 10",
+                "categoryId": "29",
+                "scheduledStartTime": datetime.combine(today - timedelta(days=1), datetime.min.time(), tz).isoformat(),
+                "actualEndTime": datetime.combine(today - timedelta(days=1), datetime.min.time(), tz).isoformat(),
+            },
+            "contentDetails": {
+                "enableLowLatency": True,
+                "enableDvr": False,
+                "boundStreamId": "stream-emitted",
+            },
+            "status": {
+                "privacyStatus": "unlisted",
+                "selfDeclaredMadeForKids": False,
+            },
+        }
+
+        youtube = _NoThumbnailUploadYoutube([template_item])
+        config = Config(
+            client_id="id",
+            client_secret="secret",
+            refresh_token="token",
+            timezone="UTC",
+            default_privacy_status="private",
+            keyword_misa_10="Misa 10h",
+            keyword_misa_12="Misa 12h",
+            keyword_misa_20="Misa 20h",
+            keyword_vela_21="Vela 21h",
+            start_offset_days=1,
+            max_days_ahead=1,
+            stop_on_create_limit=True,
+            rate_limit_retry_limit=1,
+            rate_limit_retry_base_seconds=0.0,
+            rate_limit_retry_max_seconds=0.0,
+            create_pause_seconds=0.0,
+        )
+
+        run_scheduler(youtube, config)
+
+        tomorrow = today + timedelta(days=1)
+        misa_10_title = build_title("Misa 10h", tomorrow)
+        body_by_title = {
+            body["snippet"]["title"]: body
+            for body in youtube._live.inserted_bodies
+            if "scheduledStartTime" in body["snippet"]
+        }
+        misa_10_body = body_by_title[misa_10_title]
+        self.assertEqual(misa_10_body["snippet"]["categoryId"], "29")
+        self.assertFalse(misa_10_body["status"]["selfDeclaredMadeForKids"])
+        self.assertTrue(misa_10_body["contentDetails"]["enableLowLatency"])
+        self.assertFalse(misa_10_body["contentDetails"]["enableDvr"])
+
     def test_skips_creation_when_same_slot_exists_even_with_different_title(self) -> None:
         tz = ZoneInfo("UTC")
         today = datetime.now(tz).date()
