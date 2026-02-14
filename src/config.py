@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -71,6 +72,18 @@ def _get_float_env(name: str, default: float) -> float:
         return default
 
 
+def _resolve_studio_storage_state_path() -> str:
+    configured = _get_str_env("YT_STUDIO_STORAGE_STATE_PATH", "")
+    if configured:
+        return configured
+
+    default_path = Path("storage_state.json")
+    if default_path.is_file():
+        return str(default_path)
+
+    return ""
+
+
 def load_config() -> Config:
     return Config(
         client_id=_require_env("YT_CLIENT_ID"),
@@ -90,7 +103,7 @@ def load_config() -> Config:
         rate_limit_retry_max_seconds=_get_float_env("YT_RATE_LIMIT_RETRY_MAX_SECONDS", 30.0),
         create_pause_seconds=_get_float_env("YT_CREATE_PAUSE_SECONDS", 0.2),
         creation_mode=_get_str_env("YT_CREATION_MODE", "studio_ui"),
-        studio_storage_state_path=_get_str_env("YT_STUDIO_STORAGE_STATE_PATH", ""),
+        studio_storage_state_path=_resolve_studio_storage_state_path(),
         studio_headless=_get_bool_env("YT_STUDIO_HEADLESS", True),
         studio_timeout_ms=_get_int_env("YT_STUDIO_TIMEOUT_MS", 30000),
         studio_slow_mo_ms=_get_int_env("YT_STUDIO_SLOW_MO_MS", 0),
