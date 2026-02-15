@@ -13,6 +13,11 @@ class _FakePage:
     def set_default_timeout(self, timeout_ms):
         self.timeout_ms = timeout_ms
 
+    def screenshot(self, **kwargs):
+        path = kwargs.get("path")
+        if path:
+            Path(path).write_bytes(b"fake-png")
+
 
 class _FakeContext:
     def new_page(self):
@@ -68,6 +73,8 @@ class StudioCreatorTests(unittest.TestCase):
             headless=True,
             timeout_ms=30000,
             slow_mo_ms=0,
+            log_screenshots=False,
+            log_screenshots_dir="studio_logs",
         )
         with self.assertRaises(StudioCreationError) as error:
             creator.__enter__()
@@ -84,6 +91,8 @@ class StudioCreatorTests(unittest.TestCase):
                 headless=True,
                 timeout_ms=30000,
                 slow_mo_ms=0,
+                log_screenshots=False,
+                log_screenshots_dir="studio_logs",
             )
             with patch.dict(sys.modules, self._fake_playwright_modules()):
                 with creator:
@@ -99,11 +108,34 @@ class StudioCreatorTests(unittest.TestCase):
                 headless=True,
                 timeout_ms=30000,
                 slow_mo_ms=0,
+                log_screenshots=False,
+                log_screenshots_dir="studio_logs",
             )
             with self.assertRaises(StudioCreationError) as error:
                 creator.__enter__()
 
         self.assertIn("no contiene JSON válido", str(error.exception))
+
+    def test_screenshot_directory_is_created_when_enabled(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            json_path = Path(temp_dir) / "storage_state.json"
+            json_path.write_text(json.dumps({"cookies": [], "origins": []}), encoding="utf-8")
+            screenshots_dir = Path(temp_dir) / "capturas"
+
+            creator = StudioBroadcastCreator(
+                storage_state_path=str(json_path),
+                headless=True,
+                timeout_ms=30000,
+                slow_mo_ms=0,
+                log_screenshots=True,
+                log_screenshots_dir=str(screenshots_dir),
+            )
+
+            with patch.dict(sys.modules, self._fake_playwright_modules()):
+                with creator:
+                    self.assertTrue(screenshots_dir.is_dir())
+                    screenshots = list(screenshots_dir.glob("*.png"))
+                    self.assertGreaterEqual(len(screenshots), 1)
 
 
 if __name__ == "__main__":
