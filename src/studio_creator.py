@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import json
 from pathlib import Path
-from typing import Optional
+import re
 
 
 STUDIO_LIVESTREAM_URL = "https://studio.youtube.com/channel/UCZU9G9HPOLYK-QeaCJo6Fhg/livestreaming"
@@ -34,16 +34,21 @@ class StudioBroadcastCreator(AbstractContextManager["StudioBroadcastCreator"]):
         headless: bool,
         timeout_ms: int,
         slow_mo_ms: int,
+        log_screenshots: bool,
+        log_screenshots_dir: str,
     ) -> None:
         self._storage_state_raw = storage_state_path
         self._storage_state_path = Path(storage_state_path)
         self._headless = headless
         self._timeout_ms = timeout_ms
         self._slow_mo_ms = slow_mo_ms
+        self._log_screenshots = log_screenshots
+        self._log_screenshots_dir = Path(log_screenshots_dir)
         self._playwright = None
         self._browser = None
         self._context = None
         self._page = None
+        self._screenshot_index = 0
 
     def __enter__(self) -> "StudioBroadcastCreator":
         if not self._storage_state_raw.strip():
@@ -108,6 +113,9 @@ class StudioBroadcastCreator(AbstractContextManager["StudioBroadcastCreator"]):
                 "YT_STUDIO_STORAGE_STATE_PATH debe contener un objeto JSON con el estado "
                 f"de Playwright. Archivo: {self._storage_state_path}"
             )
+
+        self._ensure_screenshot_directory()
+
         _log(f"STUDIO: usando storage state en {self._storage_state_path}.")
         try:
             from playwright.sync_api import Error as PlaywrightError
@@ -140,6 +148,7 @@ class StudioBroadcastCreator(AbstractContextManager["StudioBroadcastCreator"]):
         self._page = self._context.new_page()
         self._page.set_default_timeout(self._timeout_ms)
         _log(f"STUDIO: contexto y página listos (timeout_ms={self._timeout_ms}).")
+        self._capture_state("contexto-listo")
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
@@ -167,34 +176,34 @@ class StudioBroadcastCreator(AbstractContextManager["StudioBroadcastCreator"]):
         _log(f"STUDIO: abriendo YouTube Studio en {STUDIO_LIVESTREAM_URL}")
         page.goto(STUDIO_LIVESTREAM_URL, wait_until="domcontentloaded")
         _log("STUDIO: YouTube Studio cargado (domcontentloaded).")
+        self._capture_state("studio-cargado")
 
-        # 1) Programar emisión.
         _log("STUDIO STEP 1/8: click en 'Programar emisión'.")
         self._click_first([
             page.get_by_role("button", name="Programar emisión"),
             page.get_by_role("button", name="Schedule stream"),
         ])
+        self._capture_state("step-1-programar-emision")
 
-        # 2) Popup: Configurar con ajustes anteriores.
         _log("STUDIO STEP 2/8: abrir 'Configurar con ajustes anteriores'.")
         self._click_first([
             page.get_by_text("Configurar con ajustes anteriores", exact=False),
             page.get_by_text("Reuse settings", exact=False),
             page.get_by_text("ajustes anteriores", exact=False),
         ])
+        self._capture_state("step-2-ajustes-anteriores")
 
-        # 3) Seleccionar la plantilla más reciente que contenga la keyword.
         _log(f"STUDIO STEP 3/8: seleccionar plantilla con keyword '{template_keyword}'.")
         self._pick_latest_matching_template(template_keyword)
+        self._capture_state("step-3-plantilla")
 
-        # 4) Reutilizar configuración.
         _log("STUDIO STEP 4/8: click en 'Reutilizar configuración'.")
         self._click_first([
             page.get_by_role("button", name="Reutilizar configuración"),
             page.get_by_role("button", name="Reuse settings"),
         ])
+        self._capture_state("step-4-reutilizar")
 
-        # 5) Detalles: actualizar título.
         _log(f"STUDIO STEP 5/8: rellenar título '{title}'.")
         title_box = self._first_locator([
             page.locator('textarea[aria-label*="Título"]'),
@@ -204,12 +213,12 @@ class StudioBroadcastCreator(AbstractContextManager["StudioBroadcastCreator"]):
         ])
         title_box.click()
         title_box.fill(title)
+        self._capture_state("step-5-titulo")
 
-        # 6) Siguiente -> Visibilidad.
         _log("STUDIO STEP 6/8: navegar a pestaña 'Visibilidad'.")
         self._go_to_visibility_tab()
+        self._capture_state("step-6-visibilidad")
 
-        # 7) Programar fecha y hora en Visibilidad.
         _log(
             "STUDIO STEP 7/8: activar 'Programar' y establecer fecha/hora "
             f"{scheduled_start.strftime('%Y-%m-%d %H:%M %Z')}"
@@ -221,13 +230,14 @@ class StudioBroadcastCreator(AbstractContextManager["StudioBroadcastCreator"]):
             page.get_by_text("Schedule", exact=False),
         ])
         self._set_visibility_datetime(scheduled_start)
+        self._capture_state("step-7-fecha-hora")
 
-        # 8) Hecho.
         _log("STUDIO STEP 8/8: confirmar con 'Hecho'.")
         self._click_first([
             page.get_by_role("button", name="Hecho"),
             page.get_by_role("button", name="Done"),
         ])
+        self._capture_state("step-8-hecho")
         _log("STUDIO: emisión programada correctamente desde Studio UI.")
 
         return StudioCreateResult(
@@ -307,3 +317,31 @@ class StudioBroadcastCreator(AbstractContextManager["StudioBroadcastCreator"]):
         if self._try_click(locators):
             return
         raise StudioCreationError("No se encontró el botón esperado en YouTube Studio.")
+
+    def _ensure_screenshot_directory(self) -> None:
+        if not self._log_screenshots:
+            return
+
+        if not str(self._log_screenshots_dir).strip():
+            self._log_screenshots = False
+            _log("STUDIO: capturas desactivadas porque YT_STUDIO_LOG_SCREENSHOTS_DIR está vacío.")
+            return
+
+        self._log_screenshots_dir.mkdir(parents=True, exist_ok=True)
+        _log(f"STUDIO: capturas de log activadas en {self._log_screenshots_dir}.")
+
+    def _capture_state(self, label: str) -> None:
+        if not self._log_screenshots or not self._page:
+            return
+
+        safe_label = re.sub(r"[^a-zA-Z0-9_-]+", "-", label).strip("-") or "estado"
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        self._screenshot_index += 1
+        filename = f"{self._screenshot_index:03d}-{timestamp}-{safe_label}.png"
+        screenshot_path = self._log_screenshots_dir / filename
+
+        try:
+            self._page.screenshot(path=str(screenshot_path), full_page=True)
+            _log(f"STUDIO SCREENSHOT: {screenshot_path}")
+        except Exception as exc:  # noqa: BLE001
+            _log(f"STUDIO WARN: no se pudo guardar captura '{screenshot_path}': {exc}")

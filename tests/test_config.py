@@ -28,6 +28,8 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.keyword_misa_20, "Misa 20h")
         self.assertEqual(config.keyword_vela_21, "Vela 21h")
         self.assertEqual(config.creation_mode, "studio_ui")
+        self.assertTrue(config.studio_log_screenshots)
+        self.assertEqual(config.studio_log_screenshots_dir, "studio_logs")
 
     def test_storage_state_falls_back_to_default_file(self) -> None:
         env = {

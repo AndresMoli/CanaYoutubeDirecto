@@ -66,6 +66,8 @@ def run_scheduler_studio(youtube, config: Config) -> int:
         headless=config.studio_headless,
         timeout_ms=config.studio_timeout_ms,
         slow_mo_ms=config.studio_slow_mo_ms,
+        log_screenshots=config.studio_log_screenshots,
+        log_screenshots_dir=config.studio_log_screenshots_dir,
     )
 
     with creator:

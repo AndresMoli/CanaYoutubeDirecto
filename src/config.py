@@ -28,6 +28,8 @@ class Config:
     studio_headless: bool = True
     studio_timeout_ms: int = 30000
     studio_slow_mo_ms: int = 0
+    studio_log_screenshots: bool = True
+    studio_log_screenshots_dir: str = "studio_logs"
 
 
 def _require_env(name: str) -> str:
@@ -107,4 +109,6 @@ def load_config() -> Config:
         studio_headless=_get_bool_env("YT_STUDIO_HEADLESS", True),
         studio_timeout_ms=_get_int_env("YT_STUDIO_TIMEOUT_MS", 30000),
         studio_slow_mo_ms=_get_int_env("YT_STUDIO_SLOW_MO_MS", 0),
+        studio_log_screenshots=_get_bool_env("YT_STUDIO_LOG_SCREENSHOTS", True),
+        studio_log_screenshots_dir=_get_str_env("YT_STUDIO_LOG_SCREENSHOTS_DIR", "studio_logs"),
     )

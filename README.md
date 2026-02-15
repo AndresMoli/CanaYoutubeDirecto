@@ -59,6 +59,8 @@ Para soportar dos cuentas:
 - `YT_STUDIO_HEADLESS` (default: `true`)
 - `YT_STUDIO_TIMEOUT_MS` (default: `30000`)
 - `YT_STUDIO_SLOW_MO_MS` (default: `0`)
+- `YT_STUDIO_LOG_SCREENSHOTS` (default: `true`)
+- `YT_STUDIO_LOG_SCREENSHOTS_DIR` (default: `studio_logs`)
 
 ## GitHub Actions
 
@@ -102,6 +104,9 @@ La creación por defecto ahora es desde la interfaz de YouTube Studio (Playwrigh
 ```bash
 export YT_CREATION_MODE="studio_ui"
 export YT_STUDIO_STORAGE_STATE_PATH="storage_state.json"
+export YT_STUDIO_HEADLESS="false"
+export YT_STUDIO_LOG_SCREENSHOTS="true"
+export YT_STUDIO_LOG_SCREENSHOTS_DIR="studio_logs"
 python -m src.main
 ```
 
@@ -113,6 +118,8 @@ python scripts/save_studio_storage_state.py storage_state.json
 ```
 
 En este modo, la creación entra exactamente en `https://studio.youtube.com/channel/UCZU9G9HPOLYK-QeaCJo6Fhg/livestreaming`, pulsa **Programar emisión**, luego **Configurar con ajustes anteriores**, selecciona la plantilla más reciente por keyword (`Misa 10h`, `Misa 12h`, `Misa 20h`, `Vela 21h`), pulsa **Reutilizar configuración**, cambia el título, avanza con **Siguiente** hasta **Visibilidad**, programa fecha/hora y finaliza con **Hecho**.
+
+Durante la ejecución se guardan capturas del estado en cada paso del log dentro de `YT_STUDIO_LOG_SCREENSHOTS_DIR` (por defecto `studio_logs`).
 
 
 Para volver al modo API clásico:
